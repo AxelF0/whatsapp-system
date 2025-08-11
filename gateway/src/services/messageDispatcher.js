@@ -35,7 +35,7 @@ class MessageDispatcher {
                 response_sent: false
             };
 
-            console.log('💾 Guardando mensaje en BD...', JSON.stringify(messageToSave, null, 2));
+            console.log('💾 Guardando mensaje en BD...');
 
             // 1. Guardar mensaje en base de datos
             const savedMessage = await this.moduleConnector.forwardRequest(
@@ -45,31 +45,29 @@ class MessageDispatcher {
                 messageToSave
             );
             
-            console.log('✅ Respuesta de la base de datos:', JSON.stringify(savedMessage, null, 2));
-
             console.log('✅ Mensaje guardado en BD:', savedMessage.data._id);
 
-            // 2. Determinar si es consulta de cliente o comando de usuario
-            const processingResult = {
-                type: 'client_query',
-                messageId: savedMessage.data._id,
-                requiresResponse: true,
-                fromNumber: messageData.from,
-                agentNumber: messageData.to
+            // 2. Enviar al módulo de procesamiento para análisis y ruteo
+            console.log('🧠 Enviando al módulo de procesamiento...');
+            
+            const processingRequest = {
+                ...messageToSave,
+                databaseId: savedMessage.data._id
             };
 
-            console.log('✅ Mensaje clasificado como:', processingResult.type);
+            const processingResult = await this.moduleConnector.forwardRequest(
+                'processing',
+                '/api/process/message',
+                'POST',
+                processingRequest
+            );
 
-            // 3. Si requiere respuesta, programar procesamiento
-            if (processingResult.requiresResponse) {
-                console.log('⏳ Mensaje programado para procesamiento posterior');
-                // Aquí es donde conectaremos con el módulo de IA más adelante
-            }
+            console.log('✅ Procesamiento completado:', processingResult.data.analysis.type);
 
             return {
                 saved: true,
                 messageId: savedMessage.data._id,
-                processing: processingResult
+                processing: processingResult.data
             };
 
         } catch (error) {
@@ -125,52 +123,59 @@ class MessageDispatcher {
             type: message.type
         });
 
-        // Construir datos del mensaje
-        const messageData = {
-            messageId: message.id,
-            from: message.from,
-            to: context.metadata?.phone_number_id || 'system',
-            body: this.extractMessageBody(message),
-            type: message.type,
-            direction: 'incoming',
-            source: 'whatsapp-api',
-            timestamp: new Date(parseInt(message.timestamp) * 1000)
-        };
-
-        // Guardar en base de datos
-        const savedMessage = await this.moduleConnector.forwardRequest(
-            'database',
-            '/api/messages',
-            'POST',
-            messageData
-        );
-
-        // Validar si el usuario existe en el sistema
-        const userValidation = await this.moduleConnector.forwardRequest(
-            'database',
-            `/api/users/validate/${message.from}`,
-            'GET'
-        );
-
-        if (userValidation.valid) {
-            console.log('✅ Usuario validado:', userValidation.data.nombre);
-            
-            // Es un comando de usuario (agente/gerente)
-            return {
-                type: 'user_command',
-                messageId: savedMessage.data._id,
-                user: userValidation.data,
-                requiresBackendProcessing: true
+        try {
+            // Construir datos del mensaje
+            const messageData = {
+                messageId: message.id,
+                from: message.from,
+                to: context.metadata?.phone_number_id || 'system',
+                body: this.extractMessageBody(message),
+                type: message.type,
+                direction: 'incoming',
+                source: 'whatsapp-api',
+                timestamp: new Date(parseInt(message.timestamp) * 1000),
+                processed: false,
+                response_sent: false
             };
-        } else {
-            console.log('❌ Usuario no válido, ignorando mensaje');
+
+            console.log('💾 Guardando mensaje de API en BD...');
+
+            // Guardar en base de datos
+            const savedMessage = await this.moduleConnector.forwardRequest(
+                'database',
+                '/api/messages',
+                'POST',
+                messageData
+            );
+
+            console.log('✅ Mensaje de API guardado:', savedMessage.data._id);
+
+            // Enviar al módulo de procesamiento
+            console.log('🧠 Enviando mensaje de API al procesamiento...');
             
-            // No responder a usuarios no registrados
-            return {
-                type: 'invalid_user',
-                messageId: savedMessage.data._id,
-                requiresBackendProcessing: false
+            const processingRequest = {
+                ...messageData,
+                databaseId: savedMessage.data._id
             };
+
+            const processingResult = await this.moduleConnector.forwardRequest(
+                'processing',
+                '/api/process/message',
+                'POST',
+                processingRequest
+            );
+
+            console.log('✅ Mensaje de API procesado:', processingResult.data.analysis.type);
+
+            return {
+                saved: true,
+                messageId: savedMessage.data._id,
+                processing: processingResult.data
+            };
+
+        } catch (error) {
+            console.error('❌ Error procesando mensaje de API:', error.message);
+            throw error;
         }
     }
 
@@ -191,5 +196,35 @@ class MessageDispatcher {
                 return `[${message.type.toUpperCase()}]`;
         }
     }
+
+    // Manejar respuesta de procesamiento (para cuando se complete el flujo)
+    async handleProcessingResponse(processingResponse) {
+        console.log('📋 Manejando respuesta de procesamiento:', processingResponse.analysis.type);
+
+        try {
+            if (processingResponse.analysis.type === 'client_query') {
+                console.log('👤 Procesamiento completado para consulta de cliente');
+                // La respuesta se enviará automáticamente a través del módulo de respuestas
+                
+            } else if (processingResponse.analysis.type === 'system_command') {
+                console.log('⚙️ Procesamiento completado para comando de sistema');
+                // La respuesta se enviará automáticamente al usuario que envió el comando
+                
+            } else {
+                console.log('ℹ️ Mensaje ignorado o no válido');
+            }
+
+            return {
+                handled: true,
+                type: processingResponse.analysis.type,
+                processed: processingResponse.result.processed
+            };
+
+        } catch (error) {
+            console.error('❌ Error manejando respuesta de procesamiento:', error.message);
+            throw error;
+        }
+    }
 }
+
 module.exports = MessageDispatcher;

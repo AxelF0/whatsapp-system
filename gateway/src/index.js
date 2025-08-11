@@ -121,7 +121,7 @@ app.use('/api/processing', async (req, res) => {
     }
 });
 
-// Proxy a módulo de respuestas
+// Proxy a módulo de respuestas (cuando esté listo)
 app.use('/api/responses', async (req, res) => {
     try {
         const response = await moduleConnector.forwardRequest('responses', req.path, req.method, req.body);
@@ -131,7 +131,7 @@ app.use('/api/responses', async (req, res) => {
     }
 });
 
-// Proxy a módulo de backend
+// Proxy a módulo de backend (cuando esté listo)
 app.use('/api/backend', async (req, res) => {
     try {
         const response = await moduleConnector.forwardRequest('backend', req.path, req.method, req.body);
@@ -209,16 +209,17 @@ async function startGateway() {
     try {
         console.log('🚀 Inicializando Gateway...');
 
-        // Registrar módulos
+        // Registrar módulos existentes
         await moduleConnector.registerModule('database', `http://localhost:3006`);
         await moduleConnector.registerModule('whatsapp', `http://localhost:3001`);
+        await moduleConnector.registerModule('processing', `http://localhost:3002`);
         
         // Los siguientes los registraremos cuando los creemos
-        // await moduleConnector.registerModule('processing', `http://localhost:3002`);
         // await moduleConnector.registerModule('responses', `http://localhost:3005`);
         // await moduleConnector.registerModule('backend', `http://localhost:3004`);
 
         console.log('✅ Módulos registrados exitosamente');
+        
         // Verificar salud de módulos registrados
         await healthMonitor.checkAllModules();
 
