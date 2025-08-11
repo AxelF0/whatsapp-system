@@ -218,6 +218,7 @@ async function startGateway() {
         // await moduleConnector.registerModule('responses', `http://localhost:3005`);
         // await moduleConnector.registerModule('backend', `http://localhost:3004`);
 
+        console.log('✅ Módulos registrados exitosamente');
         // Verificar salud de módulos registrados
         await healthMonitor.checkAllModules();
 

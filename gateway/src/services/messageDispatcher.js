@@ -12,42 +12,58 @@ class MessageDispatcher {
         });
 
         try {
+            // Validar datos requeridos
+            if (!messageData.from || !messageData.to) {
+                throw new Error('Faltan datos requeridos: from, to');
+            }
+
+            // Asegurar formato correcto de los números de teléfono
+            const fromNumber = messageData.from.endsWith('@c.us') ? messageData.from : `${messageData.from}@c.us`;
+            const toNumber = messageData.to.endsWith('@c.us') ? messageData.to : `${messageData.to}@c.us`;
+
+            // Preparar datos para guardar en BD según el esquema esperado
+            const messageToSave = {
+                messageId: messageData.id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                from: fromNumber,
+                to: toNumber,
+                body: messageData.body || '',
+                type: messageData.type === 'chat' ? 'text' : (messageData.type || 'text'), // Asegurar tipo válido
+                direction: 'incoming',
+                source: 'whatsapp-web',
+                timestamp: messageData.timestamp ? new Date(messageData.timestamp) : new Date(),
+                processed: false,
+                response_sent: false
+            };
+
+            console.log('💾 Guardando mensaje en BD...', JSON.stringify(messageToSave, null, 2));
+
             // 1. Guardar mensaje en base de datos
             const savedMessage = await this.moduleConnector.forwardRequest(
                 'database',
                 '/api/messages',
                 'POST',
-                {
-                    messageId: messageData.id || `msg_${Date.now()}`,
-                    from: messageData.from,
-                    to: messageData.to,
-                    body: messageData.body,
-                    type: messageData.type || 'text',
-                    direction: 'incoming',
-                    source: 'whatsapp-web',
-                    timestamp: new Date()
-                }
+                messageToSave
             );
+            
+            console.log('✅ Respuesta de la base de datos:', JSON.stringify(savedMessage, null, 2));
 
-            console.log('✅ Mensaje guardado en BD');
+            console.log('✅ Mensaje guardado en BD:', savedMessage.data._id);
 
             // 2. Determinar si es consulta de cliente o comando de usuario
-            // Por ahora, asumiremos que todo es consulta de cliente
-            // Más adelante implementaremos la lógica de detección
-            
             const processingResult = {
                 type: 'client_query',
                 messageId: savedMessage.data._id,
-                requiresResponse: true
+                requiresResponse: true,
+                fromNumber: messageData.from,
+                agentNumber: messageData.to
             };
 
             console.log('✅ Mensaje clasificado como:', processingResult.type);
 
             // 3. Si requiere respuesta, programar procesamiento
             if (processingResult.requiresResponse) {
-                // Por ahora solo registramos que necesita respuesta
-                // Cuando tengamos el módulo de procesamiento, lo enviaremos ahí
-                console.log('⏳ Mensaje programado para procesamiento');
+                console.log('⏳ Mensaje programado para procesamiento posterior');
+                // Aquí es donde conectaremos con el módulo de IA más adelante
             }
 
             return {
@@ -58,6 +74,13 @@ class MessageDispatcher {
 
         } catch (error) {
             console.error('❌ Error procesando mensaje:', error.message);
+            
+            // Log más detallado para debug
+            if (error.response) {
+                console.error('❌ Response error:', error.response.data);
+                console.error('❌ Status:', error.response.status);
+            }
+            
             throw error;
         }
     }
