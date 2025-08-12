@@ -5,16 +5,24 @@ class PropertyModel {
 
     // Crear propiedad
     async create(propertyData) {
+        // Mapear a columnas reales del esquema: superficie, dimensiones (no existen tamano/dormitorios/banos)
         const query = `
-            INSERT INTO Propiedad (usuario_id, nombre_propiedad, descripcion, precio, 
-                                 ubicacion, tamano, tipo_propiedad, dormitorios, banos, estado)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO Propiedad (usuario_id, nombre_propiedad, descripcion, precio,
+                                   ubicacion, superficie, dimensiones, tipo_propiedad, estado)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         `;
         const values = [
-            propertyData.usuario_id, propertyData.nombre_propiedad, propertyData.descripcion,
-            propertyData.precio, propertyData.ubicacion, propertyData.tamano,
-            propertyData.tipo_propiedad, propertyData.dormitorios, propertyData.banos,
+            propertyData.usuario_id,
+            propertyData.nombre_propiedad,
+            propertyData.descripcion || null,
+            propertyData.precio,
+            propertyData.ubicacion,
+            // superficie puede venir como tamano o superficie
+            propertyData.superficie || propertyData.tamano || null,
+            // dimensiones opcional
+            propertyData.dimensiones || null,
+            propertyData.tipo_propiedad || null,
             propertyData.estado || 1
         ];
         const result = await this.client.query(query, values);
@@ -58,11 +66,7 @@ class PropertyModel {
             paramCount++;
         }
 
-        if (filters.dormitorios) {
-            query += ` AND p.dormitorios >= $${paramCount}`;
-            values.push(filters.dormitorios);
-            paramCount++;
-        }
+        // El esquema no tiene dormitorios/banos, por lo que omitimos ese filtro
 
         query += ` GROUP BY p.id, u.nombre, u.apellido ORDER BY p.fecha_creacion DESC`;
 
@@ -101,6 +105,18 @@ class PropertyModel {
         `;
         const values = [propertyId, fileData.nombre_archivo, fileData.url, fileData.tipo_archivo];
         const result = await this.client.query(query, values);
+        return result.rows[0];
+    }
+
+    // Borrado lógico de propiedad
+    async softDelete(id) {
+        const query = `
+            UPDATE Propiedad
+            SET estado = 0, fecha_modificacion = CURRENT_TIMESTAMP
+            WHERE id = $1
+            RETURNING *
+        `;
+        const result = await this.client.query(query, [id]);
         return result.rows[0];
     }
 }

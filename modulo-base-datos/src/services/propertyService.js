@@ -64,6 +64,17 @@ class PropertyService {
 
         return await this.propertyModel.addFile(propertyId, fileData);
     }
+
+    async deleteProperty(id) {
+        if (!id || isNaN(id)) {
+            throw new Error('ID de propiedad válido requerido');
+        }
+        const deleted = await this.propertyModel.softDelete(id);
+        if (!deleted) {
+            throw new Error('Propiedad no encontrada');
+        }
+        return deleted;
+    }
 }
 
 module.exports = PropertyService;

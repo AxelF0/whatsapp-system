@@ -1,4 +1,3 @@
--- Ejecuta este script en tu PostgreSQL
 
 -- Eliminar tablas si existen (para empezar limpio)
 DROP TABLE IF EXISTS Propiedad_archivo CASCADE;
@@ -35,7 +34,6 @@ CREATE TABLE Cliente (
     nombre VARCHAR(30),
     apellido VARCHAR(30),
     telefono VARCHAR(20) UNIQUE,
-    preferencias TEXT,
     email VARCHAR(50),
     estado INT NOT NULL DEFAULT 1,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -50,11 +48,10 @@ CREATE TABLE Propiedad (
     nombre_propiedad VARCHAR(200) NOT NULL,
     descripcion TEXT,
     precio DECIMAL(12,2) NOT NULL,
-    ubicacion VARCHAR(255),
-    tamano VARCHAR(100),
+    ubicacion VARCHAR(255) NOT NULL,
+    superficie VARCHAR(30),
+	dimensiones varchar(50),
     tipo_propiedad VARCHAR(50),
-    dormitorios INT,
-    banos INT,
     estado INT NOT NULL DEFAULT 1,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_modificacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP

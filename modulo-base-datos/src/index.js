@@ -121,6 +121,16 @@ app.get('/api/properties', async (req, res) => {
     }
 });
 
+// Buscar propiedades con filtros
+app.post('/api/properties/search', async (req, res) => {
+    try {
+        const properties = await propertyService.searchProperties(req.body);
+        res.json({ success: true, data: properties });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.get('/api/properties/:id', async (req, res) => {
     try {
         const property = await propertyService.getPropertyById(req.params.id);
@@ -140,6 +150,17 @@ app.post('/api/properties', async (req, res) => {
         res.status(201).json({ success: true, data: property });
     } catch (error) {
         res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+// Eliminar (soft delete) propiedad
+app.delete('/api/properties/:id', async (req, res) => {
+    try {
+        const deleted = await propertyService.deleteProperty(parseInt(req.params.id, 10));
+        res.json({ success: true, data: deleted });
+    } catch (error) {
+        const status = error.message === 'Propiedad no encontrada' ? 404 : 400;
+        res.status(status).json({ success: false, error: error.message });
     }
 });
 

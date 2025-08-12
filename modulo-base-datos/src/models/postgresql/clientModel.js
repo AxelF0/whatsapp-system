@@ -5,13 +5,19 @@ class ClientModel {
 
     // Crear cliente
     async create(clientData) {
+        // La tabla Cliente del script no tiene columna 'preferencias'. Mapeamos solo columnas existentes.
         const query = `
-            INSERT INTO Cliente (nombre, apellido, telefono, preferencias, email, estado)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO Cliente (nombre, apellido, telefono, email, estado)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         `;
-        const values = [clientData.nombre, clientData.apellido, clientData.telefono,
-        clientData.preferencias, clientData.email, clientData.estado || 1];
+        const values = [
+            clientData.nombre || null,
+            clientData.apellido || null,
+            clientData.telefono,
+            clientData.email || null,
+            clientData.estado || 1
+        ];
         const result = await this.client.query(query, values);
         return result.rows[0];
     }
@@ -34,14 +40,11 @@ class ClientModel {
 
     // Actualizar preferencias de cliente
     async updatePreferences(telefono, preferencias) {
-        const query = `
-            UPDATE Cliente 
-            SET preferencias = $1, fecha_modificacion = CURRENT_TIMESTAMP
-            WHERE telefono = $2
-            RETURNING *
-        `;
-        const result = await this.client.query(query, [preferencias, telefono]);
-        return result.rows[0];
+        // El esquema no tiene columna preferencias; como alternativa, guardarlo no es posible sin cambiar la BD
+        // Devolvemos el registro sin cambios para compatibilidad
+        const query = `SELECT * FROM Cliente WHERE telefono = $1`;
+        const result = await this.client.query(query, [telefono]);
+        return result.rows[0] || null;
     }
 
     // Obtener todos los clientes
