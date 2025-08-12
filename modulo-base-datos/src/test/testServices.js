@@ -39,7 +39,7 @@ async function testServices() {
         console.log('👥 PROBANDO USER SERVICE...');
 
         // Validar usuario existente
-        const existingUser = await userService.validateUser('+59170000001');
+        const existingUser = await userService.validateUser('+59171337051');
         console.log('✅ Usuario validado:', existingUser ? `${existingUser.nombre} (${existingUser.cargo_nombre})` : 'No encontrado');
 
         // Intentar crear usuario duplicado (debería fallar)
@@ -48,7 +48,7 @@ async function testServices() {
                 cargo_id: 1,
                 nombre: 'Test',
                 apellido: 'Duplicado',
-                telefono: '+59170000001'
+                telefono: '+59171337051'
             });
             console.log('❌ ERROR: Debería haber fallado al crear usuario duplicado');
         } catch (error) {
@@ -71,18 +71,18 @@ async function testServices() {
         const newClient = await clientService.createOrUpdateClient({
             nombre: 'Ana',
             apellido: 'Gonzalez',
-            telefono: '+59160000001',
+            telefono: '+59169173077',
             preferencias: 'Casa en zona norte, 3 dormitorios'
         });
         console.log('✅ Cliente creado:', `${newClient.nombre} ${newClient.apellido}`);
 
         // Buscar cliente por teléfono
-        const foundClient = await clientService.getClientByPhone('+59160000001');
+        const foundClient = await clientService.getClientByPhone('+59169173077');
         console.log('✅ Cliente encontrado:', foundClient ? `${foundClient.nombre}` : 'No encontrado');
 
         // Actualizar preferencias
         const updatedClient = await clientService.updateClientPreferences(
-            '+59160000001', 
+            '+59169173077', 
             'Casa o departamento, zona norte o sur, presupuesto $50k-80k'
         );
         console.log('✅ Preferencias actualizadas');
@@ -130,8 +130,8 @@ async function testServices() {
         // Guardar mensaje
         const testMessage = await messageService.saveMessage({
             messageId: `msg_${Date.now()}`,
-            from: '+59160000001',
-            to: '+59170000001',
+            from: '+59169173077',
+            to: '+59171337051',
             body: 'Hola, me interesa la casa colonial',
             type: 'text',
             direction: 'incoming',
@@ -140,7 +140,7 @@ async function testServices() {
         console.log('✅ Mensaje guardado:', testMessage._id);
 
         // Obtener conversación
-        const conversation = await messageService.getConversationHistory('+59160000001', '+59170000001');
+        const conversation = await messageService.getConversationHistory('+59169173077', '+59171337051');
         console.log('✅ Conversación obtenida:', `${conversation.messages.length} mensajes`);
 
         // Marcar mensaje como procesado
@@ -157,7 +157,7 @@ async function testServices() {
         await pgClient.query('DELETE FROM Usuario WHERE telefono = $1', ['+59170000004']);
         
         // Eliminar cliente de prueba
-        await pgClient.query('DELETE FROM Cliente WHERE telefono = $1', ['+59160000001']);
+        await pgClient.query('DELETE FROM Cliente WHERE telefono = $1', ['+59169173077']);
         
         // Eliminar mensajes de prueba
         await Message.deleteMany({ messageId: testMessage.messageId });

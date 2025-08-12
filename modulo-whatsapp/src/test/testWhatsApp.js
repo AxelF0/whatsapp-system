@@ -7,8 +7,8 @@ const WHATSAPP_URL = `http://localhost:${process.env.WHATSAPP_PORT || 3001}`;
 
 // Datos de prueba
 const TEST_AGENTS = [
-    { phone: '+59170000001', name: 'Juan Pérez' },
-    { phone: '+59170000002', name: 'María García' }
+    { phone: '+59171337051', name: 'Juan Pérez' }//,
+    // { phone: '+59170000002', name: 'María García' }
 ];
 
 async function testWhatsAppModule() {
@@ -93,7 +93,7 @@ async function testWhatsAppModule() {
         console.log('\n7️⃣ Probando envío de mensaje...');
         try {
             const sendResponse = await axios.post(`${WHATSAPP_URL}/api/sessions/${encodeURIComponent(TEST_AGENTS[0].phone)}/send`, {
-                to: '+59160000001',
+                to: '+59169173077',
                 message: 'Mensaje de prueba desde el sistema automatizado'
             });
 

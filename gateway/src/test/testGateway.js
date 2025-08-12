@@ -39,8 +39,8 @@ async function testGateway() {
         try {
             const messageData = {
                 id: `test_${Date.now()}`,
-                from: '+59160000001',
-                to: '+59170000001',
+                from: '+59169173077',
+                to: '+59171337051',
                 body: 'Hola, me interesa una casa',
                 type: 'text'
             };

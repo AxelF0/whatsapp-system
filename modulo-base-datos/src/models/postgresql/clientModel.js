@@ -10,8 +10,8 @@ class ClientModel {
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         `;
-        const values = [clientData.nombre, clientData.apellido, clientData.telefono, 
-                       clientData.preferencias, clientData.email, clientData.estado || 1];
+        const values = [clientData.nombre, clientData.apellido, clientData.telefono,
+        clientData.preferencias, clientData.email, clientData.estado || 1];
         const result = await this.client.query(query, values);
         return result.rows[0];
     }

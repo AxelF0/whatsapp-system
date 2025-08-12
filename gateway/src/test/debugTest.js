@@ -37,8 +37,8 @@ async function debugGateway() {
         console.log('\n 4️⃣ Probando endpoint de mensajes...');
         const testMessage = {
             messageId: 'test_' + Date.now(),
-            from: '59171337051@c.us',
-            to: '59170000001@c.us',
+            from: '59169173077@c.us',
+            to: '59171337051@c.us',
             body: 'Mensaje de prueba',
             type: 'text',
             direction: 'incoming',

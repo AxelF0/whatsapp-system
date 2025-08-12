@@ -23,7 +23,7 @@ async function simpleTest() {
         // 3. Crear una sesión simple
         console.log('\n3️⃣ Creando sesión de prueba...');
         const createResponse = await axios.post(`${WHATSAPP_URL}/api/sessions/create`, {
-            agentPhone: '+59170000001',
+            agentPhone: '+59171337051',
             agentName: 'Agente Prueba'
         });
 
