@@ -128,15 +128,20 @@ class MessageDispatcher {
             const messageData = {
                 messageId: message.id,
                 from: message.from,
-                to: context.metadata?.phone_number_id || 'system',
+                to: context.metadata?.display_phone_number || context.metadata?.phone_number_id || 'system',
                 body: this.extractMessageBody(message),
-                type: message.type,
+                type: this.mapApiType(message.type),
                 direction: 'incoming',
                 source: 'whatsapp-api',
                 timestamp: new Date(parseInt(message.timestamp) * 1000),
                 processed: false,
                 response_sent: false
             };
+
+            // Fallback para garantizar body requerido por la BD
+            if (!messageData.body) {
+                messageData.body = '';
+            }
 
             console.log('💾 Guardando mensaje de API en BD...');
 
@@ -181,9 +186,14 @@ class MessageDispatcher {
 
     // Extraer contenido del mensaje según el tipo
     extractMessageBody(message) {
+        // Soportar payloads del webhook nativo de Meta y payloads adaptados
+        if (typeof message.body === 'string' && message.body.length > 0) {
+            return message.body;
+        }
+
         switch (message.type) {
             case 'text':
-                return message.text?.body || '';
+                return message.text?.body || message.body || '';
             case 'image':
                 return `[IMAGEN] ${message.image?.caption || ''}`;
             case 'video':
@@ -192,9 +202,28 @@ class MessageDispatcher {
                 return '[AUDIO]';
             case 'document':
                 return `[DOCUMENTO] ${message.document?.filename || ''}`;
+            case 'interactive':
+                if (message.interactive?.type === 'button_reply') {
+                    return message.interactive?.button_reply?.title || '';
+                }
+                if (message.interactive?.type === 'list_reply') {
+                    return message.interactive?.list_reply?.title || '';
+                }
+                return '[INTERACTIVE]';
             default:
-                return `[${message.type.toUpperCase()}]`;
+                return message.body || `[${(message.type || 'unknown').toUpperCase()}]`;
         }
+    }
+
+    // Asegurar tipos válidos para el esquema de BD (text, image, video, audio, document)
+    mapApiType(type) {
+        const allowed = new Set(['text', 'image', 'video', 'audio', 'document']);
+        if (allowed.has(type)) return type;
+        // Mapear algunos conocidos
+        if (type === 'sticker') return 'image';
+        if (type === 'contacts') return 'document';
+        if (type === 'interactive' || type === 'button' || type === 'reaction' || type === 'system') return 'text';
+        return 'text';
     }
 
     // Manejar respuesta de procesamiento (para cuando se complete el flujo)

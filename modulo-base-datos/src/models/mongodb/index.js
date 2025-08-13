@@ -106,9 +106,8 @@ conversationSchema.pre('save', function (next) {
     next();
 });
 
-// Índices para optimizar consultas
+// Índices para optimizar consultas (evitar duplicados con unique en messageId)
 messageSchema.index({ from: 1, to: 1, timestamp: -1 });
-messageSchema.index({ messageId: 1 });
 messageSchema.index({ processed: 1, timestamp: 1 });
 
 conversationSchema.index({ clientPhone: 1, agentPhone: 1 });

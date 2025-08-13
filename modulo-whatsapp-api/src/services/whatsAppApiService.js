@@ -8,16 +8,16 @@ class WhatsAppApiService extends EventEmitter {
         super();
         
         // Configuración de la API oficial de WhatsApp
-        this.apiVersion = process.env.WHATSAPP_API_VERSION || 'v17.0';
+        this.apiVersion = process.env.WHATSAPP_API_VERSION || 'v22.0';
         this.phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
         this.businessAccountId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
         this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-        this.verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'your_verify_token_here';
+        this.verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'remaxexpressbolivia';
         
         this.baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
         
         // Número del sistema
-        this.systemNumber = process.env.SYSTEM_WHATSAPP_NUMBER || '59180000000';
+        this.systemNumber = process.env.SYSTEM_WHATSAPP_NUMBER || '15551949424';
         
         // Estado del servicio
         this.isReady = false;
@@ -36,16 +36,22 @@ class WhatsAppApiService extends EventEmitter {
 
             // Verificar el estado del número
             const phoneStatus = await this.getPhoneNumberStatus();
-            
-            if (phoneStatus.verified) {
-                console.log(`✅ Número del sistema verificado: ${phoneStatus.display_phone_number}`);
+
+            const isVerified = (phoneStatus.code_verification_status || '').toUpperCase() === 'VERIFIED';
+            const allowUnverified = String(process.env.WHATSAPP_ALLOW_UNVERIFIED || 'false').toLowerCase() === 'true';
+
+            if (isVerified || allowUnverified) {
+                console.log(`✅ Número del sistema${isVerified ? '' : ' (no verificado, modo permitido)'}: ${phoneStatus.display_phone_number}`);
                 console.log(`📱 ID del número: ${this.phoneNumberId}`);
-                console.log(`🏢 Cuenta de negocio: ${phoneStatus.verified_name}`);
-                
+                if (phoneStatus.verified_name) {
+                    console.log(`🏢 Cuenta de negocio: ${phoneStatus.verified_name}`);
+                }
+
                 this.isReady = true;
                 this.emit('ready', phoneStatus);
             } else {
-                throw new Error('El número de WhatsApp no está verificado');
+                console.warn('⚠️ El número de WhatsApp no está verificado. Establece WHATSAPP_ALLOW_UNVERIFIED=true para continuar en desarrollo.');
+                this.isReady = false;
             }
 
             return {
@@ -69,7 +75,7 @@ class WhatsAppApiService extends EventEmitter {
                 `${this.baseUrl}/${this.phoneNumberId}`,
                 {
                     params: {
-                        fields: 'display_phone_number,verified_name,code_verification_status,quality_rating,verified'
+                        fields: 'display_phone_number,verified_name,code_verification_status,quality_rating'
                     },
                     headers: {
                         'Authorization': `Bearer ${this.accessToken}`

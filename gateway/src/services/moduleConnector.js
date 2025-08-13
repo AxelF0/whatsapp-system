@@ -91,8 +91,9 @@ class ModuleConnector {
             console.error(`❌ Error en ${moduleName}:`, error.message);
             
             if (error.response) {
-                // Error HTTP del módulo
-                throw new Error(`${moduleName}: ${error.response.status} - ${error.response.data?.message || error.message}`);
+                // Error HTTP del módulo: incluir payload para debug
+                const payload = typeof error.response.data === 'object' ? JSON.stringify(error.response.data) : String(error.response.data);
+                throw new Error(`${moduleName}: ${error.response.status} - ${payload}`);
             } else if (error.code === 'ECONNREFUSED') {
                 // Módulo no disponible
                 module.status = 'unhealthy';

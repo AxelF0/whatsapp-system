@@ -6,23 +6,43 @@ class MessageService {
 
     async saveMessage(messageData) {
         // Validar datos requeridos
-        if (!messageData.messageId || !messageData.from || !messageData.to || !messageData.body) {
-            throw new Error('Faltan datos requeridos: messageId, from, to, body');
+        if (!messageData.messageId || !messageData.from || !messageData.to) {
+            throw new Error('Faltan datos requeridos: messageId, from, to');
         }
 
-        // Crear el mensaje
-        const message = new this.Message(messageData);
-        await message.save();
+        // Asegurar body para tipos no text
+        if (!messageData.body || typeof messageData.body !== 'string') {
+            messageData.body = '';
+        }
 
-        // Buscar o crear conversación
-        const conversation = await this.getOrCreateConversation(messageData.from, messageData.to);
-        
-        // Agregar mensaje a la conversación
-        conversation.messages.push(message._id);
-        conversation.context.lastInteraction = new Date();
-        await conversation.save();
+        try {
+            // Evitar duplicados por reintentos de webhook
+            const existing = await this.Message.findOne({ messageId: messageData.messageId });
+            if (existing) {
+                return existing;
+            }
 
-        return message;
+            // Crear el mensaje
+            const message = new this.Message(messageData);
+            await message.save();
+
+            // Buscar o crear conversación
+            const conversation = await this.getOrCreateConversation(messageData.from, messageData.to);
+            
+            // Agregar mensaje a la conversación
+            conversation.messages.push(message._id);
+            conversation.context.lastInteraction = new Date();
+            await conversation.save();
+
+            return message;
+        } catch (error) {
+            // Manejo de clave duplicada
+            if (error && (error.code === 11000 || (error.message && error.message.includes('E11000')))) {
+                const existingDup = await this.Message.findOne({ messageId: messageData.messageId });
+                if (existingDup) return existingDup;
+            }
+            throw error;
+        }
     }
 
     async getOrCreateConversation(clientPhone, agentPhone) {
