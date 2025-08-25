@@ -6,7 +6,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "node src/test/testWhatsApp.js",
-    "simple": "node src/test/simpleTest.js"
+    "simple": "node src/test/simpleTest.js",
+    "debug": "node src/test/debugWhatsApp.js"
   },
   "keywords": ["whatsapp", "whatsapp-web.js", "chat", "automation"],
   "author": "",

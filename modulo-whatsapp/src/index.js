@@ -1,5 +1,4 @@
 // servidor/modulo-whatsapp/src/index.js
-// VERSIÓN INTEGRADA: WhatsApp Web + API Oficial
 
 require('dotenv').config();
 const express = require('express');
@@ -10,6 +9,10 @@ const axios = require('axios');
 const WhatsAppManager = require('./services/whatsAppManager');
 const SessionManager = require('./services/sessionManager');
 const MessageHandler = require('./services/messageHandler');
+
+// Servicios de WhatsApp API (para sistema)
+const WhatsAppApiService = require('./services/whatsAppApiService');
+const WebhookHandler = require('./services/webhookHandler');
 
 const app = express();
 const PORT = process.env.WHATSAPP_PORT || 3001;
@@ -30,9 +33,15 @@ const sessionManager = new SessionManager();
 const messageHandler = new MessageHandler();
 const whatsappManager = new WhatsAppManager(sessionManager, messageHandler);
 
+// Inicializar servicios de WhatsApp API
+const whatsAppApiService = new WhatsAppApiService();
+const webhookHandler = new WebhookHandler(whatsAppApiService);
+
 // Variables globales
 app.locals.whatsappManager = whatsappManager;
 app.locals.sessionManager = sessionManager;
+app.locals.whatsAppApiService = whatsAppApiService;
+app.locals.webhookHandler = webhookHandler;
 app.locals.apiServiceUrl = `http://localhost:${process.env.WHATSAPP_API_PORT || 3007}`;
 
 // ==================== RUTAS WHATSAPP WEB (AGENTES) ====================
@@ -175,55 +184,77 @@ app.delete('/api/sessions/:agentPhone', async (req, res) => {
     }
 });
 
-// ==================== RUTAS PROXY PARA API OFICIAL ====================
+// ==================== RUTAS API OFICIAL (SISTEMA) ====================
 
-// Proxy para enviar mensajes del sistema vía API oficial
+// Webhook de WhatsApp API
+app.all('/api/whatsapp/webhook', (req, res) => {
+    webhookHandler.handleWebhook(req, res);
+});
+
+// Verificación de webhook (para Meta)
+app.get('/webhook', (req, res) => {
+    webhookHandler.handleWebhook(req, res);
+});
+
+// Webhook para eventos (para Meta)
+app.post('/webhook', (req, res) => {
+    webhookHandler.handleWebhook(req, res);
+});
+
+// Enviar mensaje del sistema
 app.post('/api/system/send', async (req, res) => {
     try {
-        console.log('🌐 Enviando mensaje del sistema vía API oficial');
+        const { to, message, replyToMessageId } = req.body;
 
-        const apiResponse = await axios.post(
-            `${app.locals.apiServiceUrl}/api/send/text`,
-            req.body,
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Source': 'whatsapp-module'
-                }
-            }
-        );
+        if (!to || !message) {
+            return res.status(400).json({
+                success: false,
+                error: 'Destinatario y mensaje son requeridos'
+            });
+        }
 
-        res.json(apiResponse.data);
+        const result = await whatsAppApiService.sendTextMessage(to, message, replyToMessageId);
+
+        res.json({
+            success: true,
+            data: result
+        });
 
     } catch (error) {
-        console.error('❌ Error enviando vía API oficial:', error.message);
+        console.error('Error enviando mensaje del sistema:', error.message);
         res.status(500).json({
             success: false,
-            error: error.response?.data?.error || error.message
+            error: error.message
         });
     }
 });
 
-// Proxy para enviar mensaje interactivo del sistema
+// Enviar mensaje interactivo del sistema
 app.post('/api/system/send/interactive', async (req, res) => {
     try {
-        const apiResponse = await axios.post(
-            `${app.locals.apiServiceUrl}/api/send/interactive`,
-            req.body,
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Source': 'whatsapp-module'
-                }
-            }
+        const { to, bodyText, buttons, headerText, footerText } = req.body;
+
+        if (!to || !bodyText || !buttons) {
+            return res.status(400).json({
+                success: false,
+                error: 'Faltan parámetros requeridos'
+            });
+        }
+
+        const result = await whatsAppApiService.sendInteractiveMessage(
+            to, bodyText, buttons, headerText, footerText
         );
 
-        res.json(apiResponse.data);
+        res.json({
+            success: true,
+            data: result
+        });
 
     } catch (error) {
+        console.error('Error enviando mensaje interactivo:', error.message);
         res.status(500).json({
             success: false,
-            error: error.response?.data?.error || error.message
+            error: error.message
         });
     }
 });
@@ -255,7 +286,7 @@ app.get('/api/system/status', async (req, res) => {
 // Health check combinado
 app.get('/api/health', async (req, res) => {
     const webSessions = sessionManager.getAllSessionsStatus();
-    
+
     // Intentar obtener estado de la API oficial
     let apiStatus = { status: 'unknown' };
     try {
@@ -265,9 +296,9 @@ app.get('/api/health', async (req, res) => {
         );
         apiStatus = apiResponse.data;
     } catch (error) {
-        apiStatus = { 
-            status: 'offline', 
-            error: error.message 
+        apiStatus = {
+            status: 'offline',
+            error: error.message
         };
     }
 
@@ -328,7 +359,7 @@ app.get('/api/info', (req, res) => {
 // Estadísticas combinadas
 app.get('/api/stats', async (req, res) => {
     const webStats = whatsappManager.getModuleStats();
-    
+
     let apiStats = null;
     try {
         const apiResponse = await axios.get(
@@ -372,53 +403,42 @@ app.use('*', (req, res) => {
 
 // ==================== INICIALIZACIÓN ====================
 
-async function startIntegratedWhatsApp() {
+async function startUnifiedWhatsApp() {
     try {
-        console.log('📱 Inicializando Módulo WhatsApp Integrado...');
-        console.log('🔄 Este módulo maneja:');
-        console.log('   • WhatsApp Web para agentes (puerto ' + PORT + ')');
-        console.log('   • Proxy a API Oficial para sistema (puerto ' + (process.env.WHATSAPP_API_PORT || 3007) + ')');
+        console.log('Inicializando Módulo WhatsApp Unificado...');
 
-        // Cargar sesiones existentes de WhatsApp Web
+        // Cargar sesiones WhatsApp-Web existentes
         await whatsappManager.loadExistingSessions();
 
-        // Verificar si la API oficial está disponible
+        // Inicializar API oficial si está configurada
         try {
-            const apiHealth = await axios.get(
-                `${app.locals.apiServiceUrl}/api/health`,
-                { timeout: 3000 }
-            );
-            
-            if (apiHealth.data.success) {
-                console.log('✅ API Oficial de WhatsApp disponible');
-                console.log(`📱 Número del sistema: ${apiHealth.data.systemNumber}`);
+            if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
+                await whatsAppApiService.initialize();
+                console.log('API Oficial de WhatsApp inicializada');
+            } else {
+                console.log('API Oficial no configurada - funcionará en modo simulación');
             }
         } catch (error) {
-            console.warn('⚠️ API Oficial no disponible. Inicia el servicio en puerto', process.env.WHATSAPP_API_PORT || 3007);
-            console.warn('   cd whatsapp-api && npm start');
+            console.error('Error inicializando API oficial:', error.message);
+            console.log('Continuando en modo simulación');
         }
 
         // Iniciar servidor
         app.listen(PORT, () => {
-            console.log(`✅ Módulo WhatsApp Integrado ejecutándose en puerto ${PORT}`);
-            console.log(`\n🌐 Endpoints principales:`);
-            console.log(`   WhatsApp Web (Agentes):`);
-            console.log(`   - GET  http://localhost:${PORT}/api/health`);
-            console.log(`   - GET  http://localhost:${PORT}/api/sessions/status`);
-            console.log(`   - POST http://localhost:${PORT}/api/sessions/create`);
-            console.log(`   - POST http://localhost:${PORT}/api/sessions/{phone}/send`);
-            console.log(`\n   API Oficial (Sistema):`);
-            console.log(`   - POST http://localhost:${PORT}/api/system/send`);
-            console.log(`   - GET  http://localhost:${PORT}/api/system/status`);
+            console.log(`Módulo WhatsApp Unificado ejecutándose en puerto ${PORT}`);
+            console.log('Endpoints disponibles:');
+            console.log(`  WhatsApp-Web: /api/sessions/*`);
+            console.log(`  API Oficial: /api/system/* y /webhook`);
+            console.log(`  Admin: /api/health, /api/stats`);
         });
 
-        // Monitor de sesiones cada 30 segundos
+        // Monitor de sesiones
         setInterval(() => {
             sessionManager.checkSessionsHealth();
         }, 30000);
 
     } catch (error) {
-        console.error('❌ Error inicializando módulo WhatsApp:', error.message);
+        console.error('Error inicializando módulo WhatsApp:', error.message);
         process.exit(1);
     }
 }
@@ -437,4 +457,4 @@ process.on('SIGTERM', async () => {
 });
 
 // Iniciar el módulo
-startIntegratedWhatsApp();
+startUnifiedWhatsApp();
