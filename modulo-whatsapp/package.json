@@ -1,18 +1,16 @@
 {
   "name": "modulo-whatsapp",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "node src/test/testWhatsApp.js",
-    "simple": "node src/test/simpleTest.js",
-    "debug": "node src/test/debugWhatsApp.js"
+    "test": "node src/test/testMultipleSessions.js"
   },
-  "keywords": ["whatsapp", "whatsapp-web.js", "chat", "automation"],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": ["whatsapp", "whatsapp-web.js", "multiple-sessions", "chat", "automation"],
+  "author": "Alexander Fernandez Calderon",
+  "license": "",
+  "description": "Modulo de whatsapp con Multiple Sesiones - Agente y Sistema",
   "dependencies": {
     "axios": "^1.11.0",
     "cors": "^2.8.5",

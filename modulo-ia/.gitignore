@@ -35,3 +35,8 @@ data/vector_db/*
 
 # Ignorar archivos generados por FAISS, si existen
 *.faiss
+
+
+data
+media
+.env.example
