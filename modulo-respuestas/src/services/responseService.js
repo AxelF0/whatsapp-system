@@ -205,8 +205,11 @@ class ResponseService {
         });
 
         try {
-            // Determinar tipo de respuesta basado en el destino
-            if (responseData.source === 'ia' || responseData.responseType === 'client') {
+            // Determinar tipo de respuesta basado en la fuente y tipo
+            if (responseData.source === 'processing-module') {
+                // Los mensajes del módulo de procesamiento son respuestas del sistema
+                return await this.sendSystemResponse(responseData);
+            } else if (responseData.source === 'ia' || responseData.responseType === 'client') {
                 return await this.sendToClient(responseData);
             } else if (responseData.source === 'backend' || responseData.responseType === 'system') {
                 return await this.sendSystemResponse(responseData);
@@ -289,63 +292,40 @@ class ResponseService {
         }
     }
 
-    // Enviar respuesta del sistema (vía API oficial)
     async sendSystemResponse(responseData) {
         console.log('🏢 Enviando respuesta del sistema a:', responseData.to);
 
         try {
-            // Validar datos requeridos
-            if (!responseData.to || !responseData.message) {
-                throw new Error('Destinatario y mensaje requeridos');
+            if (!responseData.message) {
+                throw new Error('Mensaje requerido para respuesta del sistema');
             }
 
-            // Renderizar plantilla si existe
-            let message = responseData.message;
-            if (responseData.templateId) {
-                const rendered = await this.templateService.renderTemplate(
-                    responseData.templateId,
-                    responseData.templateData || {}
-                );
-                message = rendered.content;
-            }
+            // ENVÍO REAL por WhatsApp
+            const whatsappResponse = await axios.post(
+                'http://localhost:3001/api/system/send',
+                {
+                    to: responseData.to.replace('@c.us', '').replace('+', ''),
+                    message: responseData.message,
+                    type: responseData.type || 'text',
+                    message: responseData.message,
+                message: responseData.message
+            },
+            { timeout: 30000 }
+        );
 
-            // Simulación de envío por API oficial
-            console.log('🎭 Simulando envío por API oficial');
-            console.log('📱 Para:', responseData.to);
-            console.log('💬 Mensaje:', message.substring(0, 100) + '...');
+        console.log('✅ Respuesta del sistema enviada por WhatsApp');
 
-            // Simulación de respuesta
-            const result = {
-                success: true,
-                messageId: `api_msg_${Date.now()}`,
-                timestamp: new Date()
-            };
+        return {
+            success: true,
+            messageId: whatsappResponse.data.data?.messageId || `msg_${Date.now()}`,
+            timestamp: new Date()
+        };
 
-            // Actualizar estadísticas
-            this.stats.totalSent++;
-            this.stats.systemMessages++;
-
-            // Guardar en base de datos
-            await this.saveMessageToDB({
-                ...responseData,
-                status: 'sent',
-                sentAt: new Date(),
-                messageId: result.messageId,
-                source: 'whatsapp-api'
-            });
-
-            console.log('✅ Respuesta del sistema enviada');
-
-            return result;
-        } catch (error) {
-            console.error('❌ Error enviando respuesta del sistema:', error.message);
-            
-            this.stats.totalFailed++;
-            this.stats.systemMessages++;
-            
-            throw error;
-        }
+    } catch (error) {
+        console.error('❌ Error enviando respuesta del sistema:', error.message);
+        throw error;
     }
+}
 
     // Enviar broadcast
     async sendBroadcast(broadcastData) {

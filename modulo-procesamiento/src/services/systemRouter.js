@@ -1,51 +1,183 @@
 // servidor/modulo-procesamiento/src/services/systemRouter.js
 
 const axios = require('axios');
+const MenuManager = require('./menuManager');
 
 class SystemRouter {
     constructor() {
         this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3004';
         this.responsesUrl = process.env.RESPONSES_URL || 'http://localhost:3005';
         this.timeout = 15000; // 15 segundos
+        this.menuManager = new MenuManager();
+        this.maxRetries = 3;
+        this.retryDelay = 1000;
+    }
+
+    // Limpiar número de teléfono
+    cleanPhoneNumber(phone) {
+        if (!phone) return '';
+        // Eliminar caracteres no numéricos y @c.us
+        return phone.replace(/\D/g, '').replace('@c.us', '');
+    }
+
+    // Enviar respuesta al módulo de respuestas
+    async sendToResponses(responseData, attempt = 1) {
+        try {
+            console.log('📨 Enviando respuesta al módulo de respuestas:', {
+                to: responseData.to,
+                type: responseData.type,
+                message: responseData.message?.substring(0, 50) + '...'
+            });
+
+            // Formatear el mensaje para el módulo de respuestas
+            const formattedResponse = {
+                to: responseData.to,
+                message: responseData.message,
+                responseType: responseData.type || 'text',
+                type: responseData.type || 'text',
+                metadata: responseData.metadata || {},
+                source: 'processing-module'
+            };
+
+            console.log(`📡 Enviando a: ${this.responsesUrl}/api/send`);
+            const response = await axios.post(
+                `${this.responsesUrl}/api/send`,
+                formattedResponse,
+                {
+                    timeout: this.timeout,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Source': 'processing-module'
+                    }
+                }
+            );
+
+            return response.data;
+        } catch (error) {
+            console.error(`❌ Error enviando respuesta (intento ${attempt}):`, error.message);
+
+            if (attempt < this.maxRetries) {
+                console.log(`🔄 Reintentando en ${this.retryDelay}ms... (${attempt}/${this.maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                return this.sendToResponses(responseData, attempt + 1);
+            }
+
+            throw new Error(`No se pudo enviar la respuesta después de ${this.maxRetries} intentos`);
+        }
     }
 
     // Rutear comando de sistema al backend
     async routeToBackend(messageData, analysis) {
-        console.log('⚙️ Ruteando comando de sistema al backend:', {
+        console.log('⚙️ Procesando entrada del sistema:', {
             user: analysis.userData.nombre,
-            command: analysis.contentAnalysis?.commandType || 'unknown'
+            message: messageData.body
         });
 
         try {
-            // 1. Validar permisos del usuario para el comando
-            const permissionCheck = await this.validateCommandPermissions(analysis);
-            
-            if (!permissionCheck.hasPermission) {
-                return await this.sendPermissionDeniedResponse(messageData, analysis, permissionCheck.reason);
+            // Usar el MenuManager para procesar la entrada
+            const menuResult = await this.menuManager.processInput(
+                analysis.userData.id,
+                analysis.userData.cargo_nombre,
+                messageData.body,
+                analysis.userData
+            );
+
+            // Preparar respuesta para el módulo de respuestas
+            if (menuResult.message) {
+                await this.sendToResponses({
+                    to: analysis.userPhone,
+                    message: menuResult.message,
+                    type: 'text',
+                    metadata: {
+                        messageId: messageData.messageId,
+                        userId: analysis.userData.id,
+                        userRole: analysis.userData.cargo_nombre
+                    }
+                });
             }
 
-            // 2. Preparar request para el backend
-            const backendRequest = this.prepareBackendRequest(messageData, analysis);
+            // Si hay un comando para ejecutar
+            if (menuResult.executeCommand) {
+                const backendRequest = {
+                    command: menuResult.executeCommand,
+                    user: {
+                        phone: analysis.userPhone,
+                        name: analysis.userData.nombre,
+                        role: analysis.userData.cargo_nombre,
+                        id: analysis.userData.id
+                    },
+                    timestamp: new Date().toISOString(),
+                    messageId: messageData.messageId
+                };
 
-            // 3. Por ahora simular respuesta del backend (hasta que lo implementes)
-            const simulatedResponse = await this.simulateBackendResponse(backendRequest);
+                // Enviar al backend
+                const backendResponse = await this.sendToBackend(backendRequest);
 
-            // 4. Procesar respuesta del backend
-            const processedResponse = await this.processBackendResponse(simulatedResponse);
+                // Combinar respuesta del menú con la del backend
+                return {
+                    action: 'menu_and_command',
+                    processed: true,
+                    menuResponse: menuResult,
+                    backendResponse: backendResponse,
+                    finalMessage: this.combineResponses(menuResult, backendResponse)
+                };
+            }
+
+            // Si solo es navegación de menú
+            if (menuResult.message) {
+                await this.sendToResponses({
+                    to: this.cleanPhoneNumber(messageData.from),
+                    message: menuResult.message,
+                    type: 'text',
+                    metadata: {
+                        messageId: messageData.id || new Date().getTime().toString(),
+                        userId: analysis.userData.id,
+                        userRole: analysis.userData.cargo_nombre
+                    }
+                });
+            }
 
             return {
-                action: 'sent_to_backend',
+                action: 'menu_navigation',
                 processed: true,
-                permissionCheck,
-                backendRequest,
-                backendResponse: simulatedResponse,
-                finalResponse: processedResponse
+                response: menuResult.message,
+                showMenu: menuResult.showMenu
             };
 
         } catch (error) {
-            console.error('❌ Error ruteando al backend:', error.message);
-            
-            return await this.sendErrorResponse(messageData, analysis, error.message);
+            console.error('❌ Error en sistema:', error.message);
+            return this.sendErrorResponse(messageData, analysis, error.message);
+        }
+    }
+
+    // Agregar método para combinar respuestas
+    combineResponses(menuResult, backendResponse) {
+        let finalMessage = '';
+
+        if (backendResponse && backendResponse.message) {
+            finalMessage = backendResponse.message;
+        }
+
+        if (menuResult.showMenu) {
+            finalMessage += '\n\n' + menuResult.message;
+        }
+
+        return finalMessage || menuResult.message;
+    }
+
+    // Agregar método para enviar al backend real
+    async sendToBackend(backendRequest) {
+        try {
+            const response = await axios.post(
+                `${this.backendUrl}/api/command`,
+                backendRequest,
+                { timeout: this.timeout }
+            );
+
+            return response.data;
+        } catch (error) {
+            console.error('❌ Error comunicando con backend:', error.message);
+            throw error;
         }
     }
 
@@ -85,7 +217,7 @@ class SystemRouter {
 
         if (!hasPermission) {
             let reason = 'Comando no reconocido';
-            
+
             if (commandType && userPermissions[commandType] === false) {
                 reason = `Los ${userRole}s no tienen permisos para: ${commandType}`;
             } else if (!commandType) {
@@ -98,6 +230,90 @@ class SystemRouter {
         return { hasPermission: true };
     }
 
+    async processSystemMessage(messageData, analysis) {
+        console.log('🔧 Procesando mensaje del sistema');
+
+        try {
+            // Procesar con el menú
+            const menuResult = await this.menuManager.processInput(
+                analysis.userData.id,
+                analysis.userData.cargo_nombre,
+                messageData.body,
+                analysis.userData
+            );
+
+            // Preparar respuesta
+            let responseMessage = menuResult.message;
+
+            // Si hay comando para ejecutar
+            if (menuResult.executeCommand) {
+                try {
+                    const backendRequest = {
+                        command: menuResult.executeCommand,
+                        user: {
+                            phone: analysis.userPhone,
+                            name: analysis.userData.nombre,
+                            role: analysis.userData.cargo_nombre,
+                            id: analysis.userData.id
+                        }
+                    };
+
+                    // Ejecutar en backend
+                    const backendResponse = await axios.post(
+                        `${this.backendUrl}/api/command`,
+                        backendRequest,
+                        { timeout: this.timeout }
+                    );
+
+                    if (backendResponse.data.success) {
+                        responseMessage = backendResponse.data.message || backendResponse.data.data.message;
+                    }
+                } catch (error) {
+                    console.error('Error ejecutando comando:', error.message);
+                    responseMessage = '❌ Error ejecutando el comando: ' + error.message;
+                }
+            }
+
+            // Enviar respuesta real al usuario
+            await this.sendResponseToUser(analysis.userPhone, responseMessage);
+
+            return {
+                action: 'response_sent',
+                processed: true,
+                message: responseMessage
+            };
+
+        } catch (error) {
+            console.error('❌ Error procesando mensaje del sistema:', error.message);
+            throw error;
+        }
+    }
+
+    // Agregar método para enviar respuesta
+    async sendResponseToUser(userPhone, message) {
+        try {
+            // Limpiar número
+            const cleanPhone = userPhone.replace('@c.us', '').replace(/[^\d]/g, '');
+
+            // Enviar vía módulo de respuestas
+            const response = await axios.post(
+                `${this.responsesUrl}/api/send/system`,
+                {
+                    to: cleanPhone,
+                    message: message,
+                    responseType: 'system'
+                },
+                { timeout: 30000 }
+            );
+
+            console.log('✅ Respuesta enviada al usuario vía WhatsApp');
+            return response.data;
+
+        } catch (error) {
+            console.error('❌ Error enviando respuesta:', error.message);
+            throw error;
+        }
+    }
     // Preparar request para backend
     prepareBackendRequest(messageData, analysis) {
         console.log('📋 Preparando request para backend');
@@ -221,7 +437,7 @@ class SystemRouter {
     parseClientCommand(messageBody) {
         // Ejemplo: "NUEVO CLIENTE Juan Perez 70123456 juan@email.com"
         const parts = messageBody.split(' ').slice(2); // Saltar "NUEVO CLIENTE"
-        
+
         return {
             nombre: parts[0] || '',
             apellido: parts[1] || '',
@@ -234,7 +450,7 @@ class SystemRouter {
     parseAgentCommand(messageBody) {
         // Ejemplo: "REGISTRAR AGENTE Maria Lopez 70987654 AGENTE"
         const parts = messageBody.split(' ').slice(2); // Saltar "REGISTRAR AGENTE"
-        
+
         return {
             nombre: parts[0] || '',
             apellido: parts[1] || '',
@@ -252,25 +468,25 @@ class SystemRouter {
     // Extraer tipo de lista solicitada
     extractListType(messageBody) {
         const upperBody = messageBody.toUpperCase();
-        
+
         if (upperBody.includes('PROPIEDAD')) return 'properties';
         if (upperBody.includes('CLIENTE')) return 'clients';
         if (upperBody.includes('AGENTE')) return 'agents';
         if (upperBody.includes('USUARIO')) return 'users';
-        
+
         return 'all';
     }
 
     // Extraer filtros para listas
     extractFilters(messageBody) {
         const filters = {};
-        
+
         // Filtro por ubicación
         const locationMatch = messageBody.match(/ubicacion\s+([^\s]+)/i);
         if (locationMatch) {
             filters.ubicacion = locationMatch[1];
         }
-        
+
         // Filtro por precio
         const priceMatch = messageBody.match(/precio\s+(\d+)/i);
         if (priceMatch) {
@@ -283,12 +499,12 @@ class SystemRouter {
     // Extraer tópico de ayuda
     extractHelpTopic(messageBody) {
         const upperBody = messageBody.toUpperCase();
-        
+
         if (upperBody.includes('PROPIEDAD')) return 'properties';
         if (upperBody.includes('CLIENTE')) return 'clients';
         if (upperBody.includes('AGENTE')) return 'agents';
         if (upperBody.includes('COMANDO')) return 'commands';
-        
+
         return 'general';
     }
 
@@ -448,30 +664,24 @@ class SystemRouter {
         }
     }
 
-    // Enviar al módulo de respuestas
+    // Enviar respuesta al usuario
     async sendToResponseModule(responseData) {
         console.log('📡 Enviando al módulo de respuestas');
 
         try {
-            // Por ahora simular el envío
-            console.log('📤 Simulando envío de respuesta del sistema:');
-            console.log('   Mensaje:', responseData.message.substring(0, 100) + '...');
+            // CAMBIAR DE SIMULACIÓN A REAL:
+            const response = await axios.post(
+                `${this.responsesUrl}/api/send/system`,
+                {
+                    to: responseData.to,
+                    message: responseData.message,
+                    timestamp: new Date().toISOString()
+                },
+                { timeout: this.timeout }
+            );
 
-            return {
-                success: true,
-                sent: true,
-                timestamp: new Date().toISOString()
-            };
-
-            // Cuando tengas el módulo de respuestas:
-            /*
-            const response = await axios.post(`${this.responsesUrl}/api/send`, responseData, {
-                timeout: this.timeout,
-                headers: { 'X-Source': 'processing-module' }
-            });
-
+            console.log('✅ Respuesta enviada al usuario');
             return response.data;
-            */
 
         } catch (error) {
             console.error('❌ Error enviando a módulo de respuestas:', error.message);

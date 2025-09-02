@@ -8,7 +8,7 @@ class MessageProcessor {
         this.databaseUrl = null;
         this.retryAttempts = 3;
         this.retryDelay = 1000;
-        
+
         // Contadores para estadísticas
         this.stats = {
             clientMessagesProcessed: 0,
@@ -22,7 +22,7 @@ class MessageProcessor {
     configure(config) {
         this.gatewayUrl = config.gatewayUrl;
         this.databaseUrl = config.databaseUrl;
-        
+
         console.log('🔧 MessageProcessor configurado:');
         console.log(`   Gateway: ${this.gatewayUrl}`);
         console.log(`   Database: ${this.databaseUrl}`);
@@ -36,8 +36,8 @@ class MessageProcessor {
             this.stats.clientMessagesProcessed++;
             this.stats.lastProcessedAt = new Date();
 
-            // Preparar datos para el gateway (caso: cliente → agente)
-            const gatewayData = {
+            // Preparar datos para el módulo de procesamiento (caso: cliente → agente)
+            const processingData = {
                 id: messageData.id,
                 from: messageData.from,
                 to: messageData.to, // teléfono del agente
@@ -52,10 +52,10 @@ class MessageProcessor {
                 }
             };
 
-            console.log(`📤 Enviando al gateway para procesamiento con IA...`);
+            console.log(`📤 Enviando al módulo de procesamiento...`);
 
-            // Enviar al gateway para procesamiento con IA
-            const response = await this.sendToGateway(gatewayData, 'client-message');
+            // Enviar al módulo de procesamiento
+            const response = await this.sendToGateway(processingData, 'client-message');
 
             if (response.success) {
                 console.log(`✅ Mensaje de cliente procesado exitosamente`);
@@ -67,7 +67,7 @@ class MessageProcessor {
         } catch (error) {
             console.error(`❌ Error procesando mensaje de cliente:`, error.message);
             this.stats.totalErrors++;
-            
+
             // Guardar mensaje fallido para reprocesar
             await this.saveFailedMessage(messageData, error.message, 'client');
             throw error;
@@ -76,76 +76,68 @@ class MessageProcessor {
 
     // Procesar mensaje del sistema (recibido en sesión SISTEMA)
     async processSystemMessage(messageData) {
-        console.log(`🔧 Procesando comando de SISTEMA: ${messageData.from}`);
+        console.log('🔧 INICIO processSystemMessage');
+        console.log('📱 Datos recibidos:', {
+            from: messageData.from,
+            to: messageData.to,
+            body: messageData.body,
+            sessionType: messageData.sessionType
+        });
 
         try {
-            this.stats.systemMessagesProcessed++;
-            this.stats.lastProcessedAt = new Date();
-
-            // 1. Validar si el remitente es agente/gerente registrado
+            // 1. Validar usuario - MÁS LOGS
+            console.log('🔍 Validando usuario:', messageData.from);
             const userValidation = await this.validateUser(messageData.from);
+            console.log('✅ Resultado validación:', userValidation);
 
             if (!userValidation.isValid) {
-                console.log(`❌ Usuario NO REGISTRADO: ${messageData.from}`);
-                // No responder según la lógica de negocio
+                console.log('❌ USUARIO NO VÁLIDO - No se enviará respuesta');
                 return {
                     processed: false,
-                    reason: 'Usuario no registrado'
+                    reason: 'Usuario no registrado',
+                    phone: messageData.from
                 };
             }
 
-            console.log(`✅ Usuario VALIDADO: ${userValidation.user.nombre} (${userValidation.user.cargo_nombre})`);
+            console.log('✅ Usuario VÁLIDO:', {
+                nombre: userValidation.user.nombre,
+                cargo: userValidation.user.cargo_nombre,
+                id: userValidation.user.id
+            });
 
-            // 2. Preparar datos para el gateway (caso: agente/gerente → sistema)
-            const gatewayData = {
+            // 2. Preparar datos para el módulo de procesamiento
+            const processingData = {
                 id: messageData.id,
                 from: messageData.from,
-                to: messageData.to, // teléfono del sistema
+                to: messageData.to,
                 body: messageData.body,
-                type: messageData.type,
+                type: messageData.type || 'text',
                 timestamp: messageData.timestamp,
-                source: 'whatsapp-web-system',
-                messageFlow: 'agent-to-system',
+                source: 'whatsapp-web',
+                direction: 'incoming',
                 userData: userValidation.user,
-                sessionInfo: {
-                    sessionType: messageData.sessionType,
-                    sessionName: messageData.sessionName
-                }
+                processed: false,
+                response_sent: false
             };
 
-            console.log(`📤 Enviando comando al gateway para procesamiento...`);
+            console.log('📤 Enviando al módulo de procesamiento...');
 
-            // 3. Enviar al gateway para procesamiento de backend
-            const response = await this.sendToGateway(gatewayData, 'system-command');
+            // 3. Enviar al módulo de procesamiento
+            const response = await this.sendToGateway(processingData, 'system-command');
+            console.log('✅ Respuesta del gateway:', response);
 
-            if (response.success) {
-                console.log(`✅ Comando del sistema procesado exitosamente`);
-                return response;
-            } else {
-                throw new Error(response.error || 'Gateway reportó error');
-            }
+            return response;
 
         } catch (error) {
-            console.error(`❌ Error procesando comando del sistema:`, error.message);
-            this.stats.totalErrors++;
-            
-            // Enviar mensaje de error al usuario si está registrado
-            if (messageData.from) {
-                // Nota: Esto requeriría acceso al sessionManager para enviar respuesta
-                // Por ahora solo loggear
-                console.log(`💌 Debería enviar error a: ${messageData.from}`);
-            }
-            
-            await this.saveFailedMessage(messageData, error.message, 'system');
+            console.error('❌ ERROR COMPLETO:', error);
             throw error;
         }
     }
-
     // Validar usuario en la base de datos
     async validateUser(phoneNumber) {
         try {
             const cleanPhone = this.cleanPhoneNumber(phoneNumber);
-            
+
             console.log(`🔍 Validando usuario en BD: ${cleanPhone}`);
 
             const response = await axios.get(
@@ -172,7 +164,7 @@ class MessageProcessor {
 
         } catch (error) {
             console.error(`❌ Error validando usuario:`, error.message);
-            
+
             // En caso de error de BD, asumir que no es válido
             return {
                 isValid: false,
@@ -182,17 +174,17 @@ class MessageProcessor {
         }
     }
 
-    // Enviar datos al gateway
+    // Enviar datos al módulo de procesamiento
     async sendToGateway(messageData, messageType, attempt = 1) {
         try {
-            const endpoint = messageType === 'client-message' 
-                ? '/api/whatsapp/message'  // Para mensajes de cliente
-                : '/api/whatsapp/command'; // Para comandos del sistema
+            // Enviar todo al endpoint de procesamiento de mensajes
+            const endpoint = '/api/process/message';
+            const processingUrl = process.env.PROCESSING_URL || 'http://localhost:3002';
 
-            console.log(`📡 Enviando al gateway: ${this.gatewayUrl}${endpoint}`);
+            console.log(`📡 Enviando al módulo de procesamiento: ${processingUrl}${endpoint}`);
 
             const response = await axios.post(
-                `${this.gatewayUrl}${endpoint}`,
+                `${processingUrl}${endpoint}`,
                 {
                     ...messageData,
                     messageType: messageType
@@ -201,7 +193,7 @@ class MessageProcessor {
                     timeout: 10000,
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Source': 'whatsapp-message-processor',
+                        'X-Source': 'whatsapp-module',
                         'X-Message-Type': messageType
                     }
                 }
@@ -214,7 +206,7 @@ class MessageProcessor {
 
             if (attempt < this.retryAttempts) {
                 console.log(`🔄 Reintentando en ${this.retryDelay}ms... (${attempt}/${this.retryAttempts})`);
-                
+
                 await this.sleep(this.retryDelay);
                 return this.sendToGateway(messageData, messageType, attempt + 1);
             } else {
@@ -236,10 +228,10 @@ class MessageProcessor {
             };
 
             console.log(`💾 Mensaje fallido guardado: ${failedMessage.id} (${messageFlow})`);
-            
+
             // En una implementación completa, esto se guardaría en Redis o BD
             // Por ahora solo lo registramos en consola
-            
+
         } catch (error) {
             console.error(`❌ Error guardando mensaje fallido:`, error.message);
         }
@@ -249,10 +241,10 @@ class MessageProcessor {
     cleanPhoneNumber(phone) {
         // Eliminar caracteres no numéricos
         let cleaned = phone.replace(/\D/g, '');
-        
+
         // Remover @c.us si está presente
         cleaned = cleaned.replace('@c.us', '');
-        
+
         // Asegurar formato con código de país (Bolivia 591)
         if (!cleaned.startsWith('591')) {
             // Si empieza con 7 u 8 (números móviles Bolivia), agregar 591
@@ -260,17 +252,17 @@ class MessageProcessor {
                 cleaned = '591' + cleaned;
             }
         }
-        
+
         return cleaned;
     }
 
     // Validar formato de número de teléfono
     validatePhoneNumber(phone) {
         if (!phone) return false;
-        
+
         const cleanPhone = phone.replace(/[^\d+]/g, '');
         const phoneDigits = cleanPhone.replace('+', '');
-        
+
         // Verificar longitud mínima para Bolivia (591 + 8 dígitos)
         return phoneDigits.length >= 11 && phoneDigits.startsWith('591');
     }
@@ -278,7 +270,7 @@ class MessageProcessor {
     // Limpiar contenido de mensaje
     cleanMessageContent(content) {
         if (!content) return '';
-        
+
         return content
             .replace(/[\r\n\t]/g, ' ')    // Normalizar espacios en blanco
             .replace(/\s+/g, ' ')         // Múltiples espacios a uno
@@ -291,29 +283,29 @@ class MessageProcessor {
         switch (messageData.type) {
             case 'chat':
                 return messageData.body || '';
-            
+
             case 'image':
                 return `[IMAGEN]${messageData.caption ? ` ${messageData.caption}` : ''}`;
-            
+
             case 'video':
                 return `[VIDEO]${messageData.caption ? ` ${messageData.caption}` : ''}`;
-            
+
             case 'audio':
             case 'ptt':
                 return '[AUDIO]';
-            
+
             case 'document':
                 return `[DOCUMENTO]${messageData.filename ? ` ${messageData.filename}` : ''}`;
-            
+
             case 'location':
                 return `[UBICACIÓN] ${messageData.latitude || ''}, ${messageData.longitude || ''}`;
-            
+
             case 'vcard':
                 return '[CONTACTO]';
-            
+
             case 'sticker':
                 return '[STICKER]';
-            
+
             default:
                 return `[${messageData.type?.toUpperCase() || 'UNKNOWN'}]`;
         }
@@ -325,7 +317,7 @@ class MessageProcessor {
             const response = await axios.get(`${this.gatewayUrl}/api/health`, {
                 timeout: 5000
             });
-            
+
             return {
                 available: true,
                 status: response.data
@@ -345,7 +337,7 @@ class MessageProcessor {
             const response = await axios.get(`${this.databaseUrl}/api/health`, {
                 timeout: 5000
             });
-            
+
             return {
                 available: true,
                 status: response.data
@@ -378,10 +370,10 @@ class MessageProcessor {
     // Procesar cola de mensajes fallidos (para implementación futura)
     async processFailedMessages() {
         console.log('🔄 Procesando mensajes fallidos...');
-        
+
         // Aquí se implementaría la lógica para reprocesar mensajes fallidos
         // desde Redis o base de datos
-        
+
         return {
             processed: 0,
             failed: 0,
@@ -405,7 +397,7 @@ class MessageProcessor {
                     messages.push(currentMessage.trim());
                     currentMessage = '';
                 }
-                
+
                 // Si una línea individual es muy larga, cortarla por palabras
                 if (line.length > maxLength) {
                     const words = line.split(' ');

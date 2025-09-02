@@ -8,11 +8,22 @@ class PropertyService {
         this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
         
         // Esquema de validación para propiedades
+        // Esquema para archivos de propiedad
+        this.propertyFileSchema = Joi.object({
+            property_id: Joi.number().required(),
+            file_type: Joi.string().valid('image', 'document', 'video').required(),
+            file_name: Joi.string().required(),
+            file_path: Joi.string().required(),
+            file_size: Joi.number().required(),
+            mime_type: Joi.string().required(),
+            usuario_id: Joi.number().required()
+        });
+
         this.propertySchema = Joi.object({
             usuario_id: Joi.number().required(),
             nombre_propiedad: Joi.string().max(200).required(),
             descripcion: Joi.string().max(1000).allow(''),
-            precio: Joi.number().min(10000).max(10000000).required(),
+            precio: Joi.number().min(10000).required(),
             ubicacion: Joi.string().max(255).required(),
             tamano: Joi.string().max(100).allow(''),
             tipo_propiedad: Joi.string().valid('casa', 'departamento', 'terreno', 'oficina', 'local').default('casa'),

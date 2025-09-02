@@ -11,9 +11,10 @@ class WhatsAppConnector {
         this.timeout = 30000; // 30 segundos
     }
 
-    // Enviar mensaje vía WhatsApp-Web (para clientes)
+    // Enviar mensaje vía WhatsApp-Web
     async sendViaWhatsAppWeb(messageData) {
         console.log('📱 Enviando vía WhatsApp-Web:', {
+            type: messageData.type || 'client',
             agent: messageData.agentPhone,
             to: messageData.to
         });
@@ -36,9 +37,14 @@ class WhatsAppConnector {
                 requestData.mediaType = firstMedia.type;
             }
 
+            // Determinar la ruta correcta según el tipo de mensaje
+            const endpoint = messageData.type === 'system' 
+                ? `${this.whatsappWebUrl}/api/system/send`
+                : `${this.whatsappWebUrl}/api/sessions/${encodeURIComponent(messageData.agentPhone)}/send`;
+
             // Enviar a través del módulo WhatsApp
             const response = await axios.post(
-                `${this.whatsappWebUrl}/api/sessions/${encodeURIComponent(messageData.agentPhone)}/send`,
+                endpoint,
                 requestData,
                 {
                     timeout: this.timeout,
@@ -77,11 +83,11 @@ class WhatsAppConnector {
     async sendViaAPI(messageData) {
         console.log('🌐 Enviando vía API oficial de WhatsApp');
 
-        // Verificar configuración
-        if (!this.apiToken || !this.phoneNumberId) {
-            console.log('⚠️ API de WhatsApp no configurada, simulando envío');
-            return this.simulateAPISend(messageData);
-        }
+        // Como no tenemos configuración de API oficial, usar WhatsApp Web
+        return await this.sendViaWhatsAppWeb({
+            ...messageData,
+            type: 'system'  // Marcar explícitamente como mensaje del sistema
+        });
 
         try {
             const cleanTo = this.cleanPhoneNumber(messageData.to);

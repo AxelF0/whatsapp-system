@@ -50,9 +50,10 @@ class ClientModel {
     // Obtener todos los clientes
     async findAll() {
         const query = `
-            SELECT * FROM Cliente 
-            WHERE estado = 1 
-            ORDER BY fecha_creacion DESC
+            SELECT *
+            FROM Cliente
+            WHERE estado = 1
+            ORDER BY nombre, apellido
         `;
         const result = await this.client.query(query);
         return result.rows;

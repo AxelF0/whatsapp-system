@@ -11,6 +11,9 @@ class MultiSessionManager {
         this.qrCodes = new Map();  // 'agent' | 'system' -> qrCode
         this.messageProcessor = null;
         
+        // Control de mensajes para evitar duplicados
+        this.messageCache = new Map(); // messageId -> timestamp
+        
         this.sessionsDir = path.join(__dirname, '../sessions');
         this.createSessionsDirectory();
         
@@ -19,6 +22,9 @@ class MultiSessionManager {
             agent: { phone: null, name: null },
             system: { phone: null, name: null }
         };
+        
+        // Limpiar cache cada 5 minutos
+        setInterval(() => this.cleanMessageCache(), 5 * 60 * 1000);
     }
 
     // Crear directorio de sesiones
@@ -307,6 +313,24 @@ class MultiSessionManager {
         }
     }
 
+    // Control de mensajes duplicados
+    isMessageDuplicate(messageKey) {
+        return this.messageCache.has(messageKey);
+    }
+
+    cacheMessage(messageKey) {
+        this.messageCache.set(messageKey, Date.now());
+        // Limpiar después de 5 minutos
+        setTimeout(() => this.messageCache.delete(messageKey), 5 * 60 * 1000);
+    }
+
+    generateMessageKey(sessionType, to, message) {
+        const cleanTo = to.replace(/[^\d]/g, '');
+        const messagePreview = message.substring(0, 50);
+        const timestamp = Date.now();
+        return `${sessionType}_${cleanTo}_${messagePreview}_${timestamp}`;
+    }
+
     // Enviar mensaje desde una sesión específica
     async sendMessage(sessionType, messageData) {
         const sessionData = this.sessions.get(sessionType);
@@ -319,10 +343,26 @@ class MultiSessionManager {
             throw new Error(`Sesión ${sessionType} no está lista (estado: ${sessionData.status})`);
         }
 
+        // Generar clave única para el mensaje
+        const messageKey = this.generateMessageKey(sessionType, messageData.to, messageData.message);
+
+        // Verificar duplicados
+        if (this.isMessageDuplicate(messageKey)) {
+            console.log('⚠️ Mensaje duplicado detectado:', messageKey);
+            return {
+                success: false,
+                error: 'Mensaje duplicado detectado',
+                messageKey
+            };
+        }
+
         const { client } = sessionData;
         const sessionIcon = sessionType === 'agent' ? '👤' : '🖥️';
 
         try {
+            // Marcar mensaje como en proceso
+            this.cacheMessage(messageKey);
+
             // Formatear número de destino
             const cleanNumber = messageData.to.replace(/[^\d]/g, '');
             const chatId = cleanNumber.includes('@') ? cleanNumber : cleanNumber + "@c.us";
@@ -353,7 +393,8 @@ class MultiSessionManager {
                 success: true,
                 messageId: result.id._serialized,
                 timestamp: new Date(),
-                sessionType
+                sessionType,
+                messageKey
             };
 
         } catch (error) {

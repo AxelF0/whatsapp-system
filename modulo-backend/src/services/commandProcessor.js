@@ -148,6 +148,33 @@ class CommandProcessor {
             },
 
             // Comando de ayuda
+            'add_property_file': {
+                name: 'Adjuntar Archivo a Propiedad',
+                description: 'Adjunta un archivo (documento, imagen o video) a una propiedad',
+                format: 'ADJUNTAR ARCHIVO [archivo]',
+                example: 'ADJUNTAR ARCHIVO [enviar archivo]',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleAttachPropertyFile.bind(this)
+            },
+
+            'search_properties': {
+                name: 'Buscar Propiedades',
+                description: 'Busca propiedades según criterios',
+                format: 'BUSCAR PROPIEDADES [criterios]',
+                example: 'BUSCAR PROPIEDADES tipo:casa precio:200000-300000',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleSearchProperties.bind(this)
+            },
+
+            'broadcast_message': {
+                name: 'Envío Masivo',
+                description: 'Envía un mensaje a múltiples destinatarios',
+                format: 'ENVIO MASIVO [grupo] [mensaje]',
+                example: 'ENVIO MASIVO clientes Buenos días, tenemos nuevas propiedades...',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleBroadcastMessage.bind(this)
+            },
+
             'help': {
                 name: 'Ayuda',
                 description: 'Muestra comandos disponibles',
@@ -215,7 +242,7 @@ class CommandProcessor {
     // Handler: Crear Propiedad
     async handleCreateProperty(commandData) {
         const params = commandData.command.parameters;
-        
+
         const propertyData = {
             usuario_id: commandData.user.id,
             nombre_propiedad: params.propertyData?.nombre_propiedad || 'Propiedad sin nombre',
@@ -228,12 +255,12 @@ class CommandProcessor {
             banos: params.propertyData?.banos || 0,
             estado: 1
         };
-    
+
         const property = await this.propertyService.create(propertyData);
-        
+
         // Formatear ID para mostrar
         const displayId = `PROP${String(property.id).padStart(3, '0')}`;
-    
+
         return {
             success: true,
             action: 'property_created',
@@ -290,6 +317,12 @@ class CommandProcessor {
     async handleListProperties(commandData) {
         const params = commandData.command.parameters;
         const filters = params.filters || {};
+        const listMode = params.listMode || 'all'; // 'all' o 'my'
+
+        // Si es "mis propiedades", filtrar por usuario_id
+        if (listMode === 'my') {
+            filters.usuario_id = commandData.user.id;
+        }
 
         const properties = await this.propertyService.search(filters);
 
@@ -377,28 +410,49 @@ class CommandProcessor {
 
     // Handler: Actualizar Cliente
     async handleUpdateClient(commandData) {
-        const params = commandData.command.parameters;
-        const clientData = params.clientData || {};
+        try {
+            const params = commandData.command.parameters;
+            const clientData = params.clientData || {};
+            const updateMode = params.updateMode || 'single'; // 'single' o 'all'
 
-        if (!clientData.telefono) {
-            throw new Error('Teléfono del cliente requerido');
+            if (!clientData.telefono) {
+                throw new Error('Teléfono del cliente requerido');
+            }
+
+            // Obtener cliente existente
+            const existingClient = await this.clientService.getByPhone(clientData.telefono);
+            if (!existingClient) {
+                throw new Error('Cliente no encontrado');
+            }
+
+            // Si es modificación completa, validar campos requeridos
+            if (updateMode === 'all' && (!clientData.nombre || !clientData.apellido || !clientData.email)) {
+                throw new Error('Para modificación completa, se requieren: nombre, apellido y email');
+            }
+
+            // Preparar datos de actualización
+            const updateData = {
+                telefono: clientData.telefono,
+                ...existingClient, // Mantener datos existentes
+                ...(clientData.nombre && { nombre: clientData.nombre }),
+                ...(clientData.apellido && { apellido: clientData.apellido }),
+                ...(clientData.email && { email: clientData.email }),
+                ...(clientData.preferencias && { preferencias: clientData.preferencias }),
+                estado: clientData.estado !== undefined ? clientData.estado : existingClient.estado
+            };
+
+            const client = await this.clientService.update(clientData.telefono, updateData);
+
+            return {
+                success: true,
+                action: 'client_updated',
+                message: `✅ Cliente actualizado exitosamente\n\n👤 ${client.nombre} ${client.apellido}\n📱 ${client.telefono}${client.email ? '\n📧 ' + client.email : ''}${client.preferencias ? '\n🔍 Preferencias: ' + client.preferencias : ''}\n📋 Estado: ${client.estado === 1 ? 'Activo' : 'Inactivo'}`,
+                data: client
+            };
+        } catch (error) {
+            console.error('❌ Error actualizando cliente:', error.message);
+            throw error;
         }
-
-        const client = await this.clientService.update(clientData.telefono, {
-            nombre: clientData.nombre || '',
-            apellido: clientData.apellido || '',
-            telefono: clientData.telefono,
-            email: clientData.email || '',
-            preferencias: clientData.preferencias || '',
-            estado: 1
-        });
-
-        return {
-            success: true,
-            action: 'client_updated',
-            message: `✅ Cliente actualizado exitosamente\n\n👤 ${client.nombre} ${client.apellido}\n📱 ${client.telefono}`,
-            data: client
-        };
     }
 
     // Handler: Listar Clientes
@@ -872,6 +926,174 @@ ${this.generateRecommendations(stats)}`;
         console.log('🛑 Cerrando procesador de comandos...');
         await this.updateStats();
         console.log('✅ Procesador de comandos cerrado');
+    }
+    // Handler: Adjuntar archivo a propiedad
+    async handleAttachPropertyFile(commandData) {
+        const params = commandData.command.parameters;
+        const propertyId = params.propertyId;
+        const fileData = params.fileData;
+        const knowsProperty = params.knowsProperty;
+
+        try {
+            if (!fileData) {
+                throw new Error('Archivo requerido');
+            }
+
+            // Si no conoce la propiedad, primero mostrar lista
+            if (!knowsProperty) {
+                const properties = await this.propertyService.search({ usuario_id: commandData.user.id });
+                if (properties.length === 0) {
+                    throw new Error('No tienes propiedades registradas');
+                }
+
+                return {
+                    success: true,
+                    action: 'property_list_for_attachment',
+                    message: '📋 Selecciona la propiedad a la que quieres adjuntar el archivo:\n\n' +
+                        properties.map((p, i) => `${i + 1}. 🏠 ${p.nombre_propiedad}`).join('\n'),
+                    data: properties
+                };
+            }
+
+            // Si tiene ID de propiedad, adjuntar archivo
+            const attachment = await this.propertyService.attachFile(propertyId, fileData, commandData.user.id);
+
+            return {
+                success: true,
+                action: 'property_file_attached',
+                message: `✅ Archivo adjuntado correctamente a la propiedad ${propertyId}`,
+                data: attachment
+            };
+        } catch (error) {
+            throw new Error(`Error adjuntando archivo: ${error.message}`);
+        }
+    }
+    // Handler: Buscar Propiedades
+    async handleSearchProperties(commandData) {
+        const params = commandData.command.parameters;
+        const criteria = params.criteria || {};
+
+        try {
+            // Construir filtros
+            const filters = {};
+
+            if (criteria.tipo) {
+                filters.tipo_propiedad = criteria.tipo;
+            }
+
+            if (criteria.precio) {
+                const [min, max] = criteria.precio.split('-').map(Number);
+                if (!isNaN(min)) filters.precio_min = min;
+                if (!isNaN(max)) filters.precio_max = max;
+            }
+
+            if (criteria.dormitorios) {
+                filters.dormitorios = parseInt(criteria.dormitorios);
+            }
+
+            if (criteria.banos) {
+                filters.banos = parseInt(criteria.banos);
+            }
+
+            if (criteria.ubicacion) {
+                filters.ubicacion = criteria.ubicacion;
+            }
+
+            // Realizar búsqueda
+            const properties = await this.propertyService.search(filters);
+
+            if (properties.length === 0) {
+                return {
+                    success: true,
+                    action: 'properties_searched',
+                    message: '📋 No se encontraron propiedades con los criterios especificados',
+                    data: []
+                };
+            }
+
+            // Formatear resultados
+            const listMessage = properties.map((p, i) =>
+                `${i + 1}. 🏠 ${p.nombre_propiedad}\n   📍 ${p.ubicacion}\n   💰 ${p.precio} Bs\n   🛏️ ${p.dormitorios} dorm. 🚿 ${p.banos} baños`
+            ).join('\n\n');
+
+            return {
+                success: true,
+                action: 'properties_searched',
+                message: `🔍 **Resultados de búsqueda (${properties.length}):**\n\n${listMessage}`,
+                data: properties,
+                templateId: 'search_results',
+                templateData: {
+                    total: properties.length,
+                    propiedades: properties
+                }
+            };
+
+        } catch (error) {
+            throw new Error(`Error en la búsqueda: ${error.message}`);
+        }
+    }
+
+    // Handler: Envío masivo de mensajes
+    async handleBroadcastMessage(commandData) {
+        try {
+            const params = commandData.command.parameters;
+            const grupo = params.grupo?.toLowerCase();
+            const mensaje = params.mensaje;
+
+            if (!grupo || !mensaje) {
+                throw new Error('Se requiere especificar el grupo y el mensaje');
+            }
+
+            let recipients = [];
+            
+            // Obtener lista de destinatarios según el grupo
+            switch (grupo) {
+                case 'clientes':
+                    recipients = await this.clientService.list({ estado: 1 });
+                    break;
+                case 'agentes':
+                    recipients = await this.userService.list({ cargo: 'agente', estado: 1 });
+                    break;
+                default:
+                    throw new Error('Grupo no válido. Use "clientes" o "agentes"');
+            }
+
+            if (recipients.length === 0) {
+                throw new Error('No se encontraron destinatarios en el grupo especificado');
+            }
+
+            // Preparar respuesta para el usuario
+            const responseData = {
+                success: true,
+                action: 'broadcast_sent',
+                message: `✅ Mensaje enviado a ${recipients.length} destinatarios del grupo "${grupo}"\n\n📝 Mensaje:\n${mensaje}`,
+                data: {
+                    group: grupo,
+                    recipients: recipients.length,
+                    message: mensaje
+                }
+            };
+
+            // Enviar el mensaje a cada destinatario
+            const sendPromises = recipients.map(recipient => {
+                return this.sendResponse({
+                    phone: recipient.telefono,
+                    role: 'recipient'
+                }, {
+                    message: mensaje,
+                    responseType: 'broadcast',
+                    source: 'backend'
+                });
+            });
+
+            await Promise.all(sendPromises);
+
+            return responseData;
+
+        } catch (error) {
+            console.error('❌ Error en envío masivo:', error.message);
+            throw error;
+        }
     }
 }
 

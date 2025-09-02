@@ -4,7 +4,11 @@ const Joi = require('joi');
 class UserService {
     constructor() {
         this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
-        
+
+        // Cache para optimizar consultas frecuentes
+        this.cache = new Map();
+        this.cacheTimeout = 5 * 60 * 1000; // 5 minutos
+
         // Esquema de validación para usuarios
         this.userSchema = Joi.object({
             cargo_id: Joi.number().valid(1, 2).required(), // 1=Agente, 2=Gerente
@@ -53,24 +57,34 @@ class UserService {
     }
 
     // Actualizar usuario
-    async update(userId, updates) {
-        console.log('🔄 Actualizando usuario:', userId);
+    async update(userPhone, updates) {
+        console.log('🔄 Actualizando usuario:', userPhone);
 
         try {
+            // Obtener usuario existente
+            const existing = await this.getByPhone(userPhone);
+            if (!existing) {
+                throw new Error('Usuario no encontrado');
+            }
+
             // Validar actualizaciones
             const updateSchema = this.userSchema.fork(
                 Object.keys(this.userSchema.describe().keys),
                 (schema) => schema.optional()
             );
 
-            const { error, value } = updateSchema.validate(updates);
+            const { error, value } = updateSchema.validate({
+                ...updates,
+                telefono: existing.telefono // Mantener teléfono original
+            });
+
             if (error) {
                 throw new Error(`Validación fallida: ${error.details[0].message}`);
             }
 
             // Enviar actualización
             const response = await axios.put(
-                `${this.databaseUrl}/api/users/${userId}`,
+                `${this.databaseUrl}/api/users/${existing.id}`,
                 value,
                 { timeout: 10000 }
             );
@@ -88,12 +102,22 @@ class UserService {
         }
     }
 
-    // Desactivar usuario
-    async deactivate(userId) {
-        console.log('🚫 Desactivando usuario:', userId);
+    // Cambiar estado de usuario (activar/desactivar)
+    async changeStatus(userPhone, newStatus) {
+        console.log(`${newStatus ? '✅' : '🚫'} Cambiando estado de usuario:`, userPhone);
 
         try {
-            return await this.update(userId, { estado: 0 });
+            const user = await this.getByPhone(userPhone);
+            if (!user) {
+                throw new Error('Usuario no encontrado');
+            }
+
+            return await this.update(userPhone, {
+                estado: newStatus ? 1 : 0,
+                cargo_id: user.cargo_id,  // Mantener el cargo
+                nombre: user.nombre,      // Mantener el nombre
+                apellido: user.apellido   // Mantener el apellido
+            });
 
         } catch (error) {
             console.error('❌ Error desactivando usuario:', error.message);
@@ -163,15 +187,15 @@ class UserService {
 
             if (response.data.success) {
                 let users = response.data.data;
-                
+
                 // Filtrar por cargo si se especifica
                 if (filters.cargo) {
                     const cargoFilter = filters.cargo.toLowerCase();
-                    users = users.filter(u => 
+                    users = users.filter(u =>
                         u.cargo_nombre?.toLowerCase() === cargoFilter
                     );
                 }
-                
+
                 return users;
             } else {
                 return [];
@@ -215,7 +239,7 @@ class UserService {
 
         try {
             const agents = await this.list({ cargo: 'agente' });
-            
+
             // Simulación de actividad por agente
             const agentActivity = agents.map(agent => ({
                 id: agent.id,
@@ -243,7 +267,7 @@ class UserService {
 
         try {
             const agents = await this.list({ cargo: 'agente' });
-            
+
             // Simular mejor agente del mes
             const topAgent = agents.length > 0 ? {
                 id: agents[0].id,
@@ -268,7 +292,7 @@ class UserService {
     async getStats() {
         try {
             const users = await this.list();
-            
+
             return {
                 total: users.length,
                 agents: users.filter(u => u.cargo_id === 1).length,
@@ -281,6 +305,55 @@ class UserService {
             console.error('❌ Error obteniendo estadísticas:', error.message);
             return {};
         }
+    }
+
+    // Obtener todos los agentes
+    async getAgents() {
+        console.log('👥 Obteniendo lista de agentes y gerentes');
+
+        try {
+            // Verificar cache
+            const cacheKey = 'agents_list';
+            if (this.cache.has(cacheKey)) {
+                const cached = this.cache.get(cacheKey);
+                if (Date.now() - cached.timestamp < this.cacheTimeout) {
+                    console.log('✅ Lista de agentes obtenida del cache');
+                    return cached.data;
+                }
+            }
+
+            // Obtener de la base de datos
+            const response = await axios.get(
+                `${this.databaseUrl}/api/users`,
+                {
+                    params: { active: true },
+                    timeout: 10000
+                }
+            );
+
+            if (response.data.success) {
+                const agents = response.data.data;
+
+                // Guardar en cache
+                this.cache.set(cacheKey, {
+                    data: agents,
+                    timestamp: Date.now()
+                });
+
+                return agents;
+            } else {
+                throw new Error(response.data.error || 'Error obteniendo agentes');
+            }
+
+        } catch (error) {
+            console.error('❌ Error obteniendo agentes:', error.message);
+            throw error;
+        }
+    }
+
+    // Limpiar cache
+    clearCache() {
+        this.cache.clear();
     }
 }
 

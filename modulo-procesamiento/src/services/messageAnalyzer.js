@@ -8,14 +8,10 @@ class MessageAnalyzer {
     }
 
     async analyzeMessage(messageData) {
-        console.log('🔍 Analizando mensaje:', {
-            from: messageData.from,
-            to: messageData.to,
-            source: messageData.source
-        });
+        console.log('🔍 ANALIZANDO MENSAJE');
+        console.log('Datos completos:', messageData);
 
         try {
-            // 1. Determinar el tipo basado en la fuente y destinatario
             const analysis = {
                 messageId: messageData.messageId || messageData.id,
                 from: messageData.from,
@@ -25,67 +21,51 @@ class MessageAnalyzer {
                 body: messageData.body || ''
             };
 
-            // 2. Lógica de análisis según tu explicación:
-            if (messageData.source === 'whatsapp-web') {
-                // Mensaje llegó por WhatsApp-Web = Cliente escribiendo a Agente
-                analysis.type = 'client_query';
-                analysis.description = 'Cliente consultando a un agente';
-                analysis.clientPhone = messageData.from;
-                analysis.agentPhone = messageData.to;
-                analysis.requiresIA = true;
-                analysis.requiresBackend = false;
+            // Si viene con userData, es un comando del sistema
+            if (messageData.userData) {
+                console.log('✅ Detectado como comando del sistema (tiene userData)');
+                analysis.type = 'system_command';
+                analysis.description = `${messageData.userData.cargo_nombre} enviando comando`;
+                analysis.userPhone = messageData.from;
+                analysis.userData = messageData.userData;
+                analysis.requiresBackend = true;
+                analysis.requiresIA = false;
 
-            } else if (messageData.source === 'whatsapp-api') {
-                // Mensaje llegó por API Oficial = Alguien escribiendo al Sistema
-                
-                // Primero validar si quien escribe es usuario registrado
+                return analysis;
+            }
+
+            // Si es whatsapp-web y el TO es el sistema
+            if (messageData.source === 'whatsapp-web') {
+                // Intentar validar si es usuario del sistema
                 const userValidation = await this.userValidator.validateUser(messageData.from);
-                
+
                 if (userValidation.isValid) {
-                    // Es un agente/gerente registrado
+                    console.log('✅ Usuario validado como agente/gerente');
                     analysis.type = 'system_command';
-                    analysis.description = `${userValidation.userData.cargo_nombre} enviando comando al sistema`;
+                    analysis.description = `${userValidation.userData.cargo_nombre} enviando comando`;
                     analysis.userPhone = messageData.from;
                     analysis.userData = userValidation.userData;
-                    analysis.systemPhone = messageData.to;
-                    analysis.requiresIA = false;
                     analysis.requiresBackend = true;
-                } else {
-                    // Usuario no registrado - ignorar
-                    analysis.type = 'invalid_user';
-                    analysis.description = 'Usuario no registrado en el sistema';
                     analysis.requiresIA = false;
+                } else {
+                    console.log('❌ No es usuario del sistema, tratando como cliente');
+                    analysis.type = 'client_query';
+                    analysis.description = 'Cliente consultando';
+                    analysis.clientPhone = messageData.from;
+                    analysis.agentPhone = messageData.to;
+                    analysis.requiresIA = true;
                     analysis.requiresBackend = false;
                 }
 
-            } else {
-                // Fuente no reconocida
-                analysis.type = 'unknown_source';
-                analysis.description = 'Fuente de mensaje no reconocida';
-                analysis.requiresIA = false;
-                analysis.requiresBackend = false;
+                return analysis;
             }
 
-            // 3. Análisis adicional del contenido (si es necesario)
-            if (analysis.type === 'client_query') {
-                analysis.contentAnalysis = this.analyzeClientQuery(analysis.body);
-            } else if (analysis.type === 'system_command') {
-                analysis.contentAnalysis = this.analyzeSystemCommand(analysis.body);
-            }
-
-            console.log('✅ Análisis completado:', analysis.type);
+            // Resto del código...
             return analysis;
 
         } catch (error) {
-            console.error('❌ Error en análisis de mensaje:', error.message);
-            
-            return {
-                type: 'error',
-                description: 'Error analizando mensaje',
-                error: error.message,
-                requiresIA: false,
-                requiresBackend: false
-            };
+            console.error('❌ Error en análisis:', error.message);
+            throw error;
         }
     }
 
