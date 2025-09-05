@@ -19,6 +19,7 @@ const UserService = require('./services/userService');
 const ClientService = require('./services/clientService');
 const PropertyService = require('./services/propertyService');
 const MessageService = require('./services/messageService');
+const SessionService = require('./services/sessionService');
 
 const app = express();
 const PORT = process.env.DATABASE_PORT || 3006;
@@ -38,13 +39,15 @@ const userService = new UserService(userModel);
 const clientService = new ClientService(clientModel);
 const propertyService = new PropertyService(propertyModel);
 const messageService = new MessageService(Message, Conversation);
+const sessionService = new SessionService(userModel);
 
 // Hacer servicios disponibles para otros módulos
 app.locals.services = {
     userService,
     clientService,
     propertyService,
-    messageService
+    messageService,
+    sessionService
 };
 
 // Rutas para Usuarios
@@ -74,6 +77,21 @@ app.get('/api/users/validate/:phone', async (req, res) => {
         } else {
             res.json({ success: true, valid: false });
         }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Actualizar usuario por ID
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        if (isNaN(userId)) {
+            return res.status(400).json({ success: false, error: 'ID de usuario inválido' });
+        }
+        
+        const updatedUser = await userService.updateUser(userId, req.body);
+        res.json({ success: true, data: updatedUser });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -111,6 +129,32 @@ app.get('/api/clients/phone/:phone', async (req, res) => {
     }
 });
 
+app.get('/api/clients/find/:identifier', async (req, res) => {
+    try {
+        const client = await clientService.getClientByIdOrPhone(req.params.identifier);
+        if (client) {
+            res.json({ success: true, data: client });
+        } else {
+            res.status(404).json({ success: false, error: 'Cliente no encontrado' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.put('/api/clients/:id', async (req, res) => {
+    try {
+        const client = await clientService.updateClientById(req.params.id, req.body);
+        if (client) {
+            res.json({ success: true, data: client });
+        } else {
+            res.status(404).json({ success: false, error: 'Cliente no encontrado' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Rutas para Propiedades
 app.get('/api/properties', async (req, res) => {
     try {
@@ -125,6 +169,16 @@ app.get('/api/properties', async (req, res) => {
 app.post('/api/properties/search', async (req, res) => {
     try {
         const properties = await propertyService.searchProperties(req.body);
+        res.json({ success: true, data: properties });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Buscar TODAS las propiedades (sin filtros)
+app.get('/api/properties/all', async (req, res) => {
+    try {
+        const properties = await propertyService.searchAll();
         res.json({ success: true, data: properties });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -186,6 +240,65 @@ app.get('/api/conversations/:clientPhone/:agentPhone', async (req, res) => {
     }
 });
 
+// Rutas para Sesiones de Usuarios (MongoDB)
+app.post('/api/sessions/validate', async (req, res) => {
+    try {
+        const { phoneNumber } = req.body;
+        if (!phoneNumber) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Número de teléfono requerido' 
+            });
+        }
+
+        const result = await sessionService.validateAndCreateSession(phoneNumber);
+        res.json({ success: true, data: result });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.get('/api/sessions/:phoneNumber', async (req, res) => {
+    try {
+        const session = await sessionService.getActiveSession(req.params.phoneNumber);
+        if (session) {
+            res.json({ success: true, data: session });
+        } else {
+            res.status(404).json({ success: false, error: 'Sesión no encontrada' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.delete('/api/sessions/:phoneNumber', async (req, res) => {
+    try {
+        const result = await sessionService.closeSession(req.params.phoneNumber);
+        res.json({ success: true, data: { closed: result } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.put('/api/sessions/:phoneNumber/menu', async (req, res) => {
+    try {
+        const { menuState } = req.body;
+        const result = await sessionService.updateMenuState(req.params.phoneNumber, menuState);
+        res.json({ success: true, data: { updated: result } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.get('/api/sessions/stats/summary', async (req, res) => {
+    try {
+        const stats = await sessionService.getSessionStats();
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Health check
 app.get('/api/health', async (req, res) => {
     try {
@@ -215,6 +328,18 @@ app.get('/api/health', async (req, res) => {
 // Iniciar servidor
 app.listen(PORT, () => {
     console.log(`📊 Módulo Base de Datos ejecutándose en puerto ${PORT}`);
+    
+    // Tarea de limpieza de sesiones expiradas cada 10 minutos
+    setInterval(async () => {
+        try {
+            const cleaned = await sessionService.cleanExpiredSessions();
+            if (cleaned > 0) {
+                console.log(`🧹 Limpieza automática: ${cleaned} sesiones expiradas eliminadas`);
+            }
+        } catch (error) {
+            console.error('❌ Error en limpieza automática:', error.message);
+        }
+    }, 10 * 60 * 1000); // 10 minutos
 });
 
 module.exports = app;

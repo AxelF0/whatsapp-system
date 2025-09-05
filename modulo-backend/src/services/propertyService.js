@@ -7,28 +7,16 @@ class PropertyService {
     constructor() {
         this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
         
-        // Esquema de validación para propiedades
-        // Esquema para archivos de propiedad
-        this.propertyFileSchema = Joi.object({
-            property_id: Joi.number().required(),
-            file_type: Joi.string().valid('image', 'document', 'video').required(),
-            file_name: Joi.string().required(),
-            file_path: Joi.string().required(),
-            file_size: Joi.number().required(),
-            mime_type: Joi.string().required(),
-            usuario_id: Joi.number().required()
-        });
-
+        // Esquema de validación para propiedades (campos reales de la tabla)
         this.propertySchema = Joi.object({
             usuario_id: Joi.number().required(),
             nombre_propiedad: Joi.string().max(200).required(),
             descripcion: Joi.string().max(1000).allow(''),
-            precio: Joi.number().min(10000).required(),
+            precio: Joi.number().min(0).required(),
             ubicacion: Joi.string().max(255).required(),
-            tamano: Joi.string().max(100).allow(''),
+            superficie: Joi.string().max(100).allow(''),
+            dimensiones: Joi.string().max(100).allow(''),
             tipo_propiedad: Joi.string().valid('casa', 'departamento', 'terreno', 'oficina', 'local').default('casa'),
-            dormitorios: Joi.number().min(0).max(20).default(0),
-            banos: Joi.number().min(0).max(10).default(0),
             estado: Joi.number().valid(0, 1).default(1)
         });
 
@@ -114,6 +102,30 @@ class PropertyService {
 
         } catch (error) {
             console.error('❌ Error actualizando propiedad:', error.message);
+            throw error;
+        }
+    }
+
+    // Buscar propiedades con filtros
+    async search(filters = {}) {
+        console.log('🔍 Buscando propiedades con filtros:', filters);
+
+        try {
+            const response = await axios.post(
+                `${this.databaseUrl}/api/properties/search`,
+                filters,
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                console.log(`✅ ${response.data.data.length} propiedades encontradas`);
+                return response.data.data;
+            } else {
+                throw new Error(response.data.error || 'Error en búsqueda');
+            }
+
+        } catch (error) {
+            console.error('❌ Error buscando propiedades:', error.message);
             throw error;
         }
     }
@@ -266,6 +278,28 @@ class PropertyService {
 
         } catch (error) {
             console.error('❌ Error buscando propiedades:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar TODAS las propiedades (sin filtros)
+    async searchAll() {
+        console.log('🔍 Buscando TODAS las propiedades del sistema');
+
+        try {
+            const response = await axios.get(
+                `${this.databaseUrl}/api/properties/all`,
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                return [];
+            }
+
+        } catch (error) {
+            console.error('❌ Error buscando todas las propiedades:', error.message);
             return [];
         }
     }

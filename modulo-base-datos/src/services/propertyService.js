@@ -1,14 +1,12 @@
-// servidor/modulo-backend/src/services/propertyService.js
+// servidor/modulo-base-datos/src/services/propertyService.js
 
-const axios = require('axios');
 const Joi = require('joi');
 
 class PropertyService {
-    constructor() {
-        this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
+    constructor(propertyModel) {
+        this.model = propertyModel;
         
         // Esquema de validación para propiedades
-        // Esquema para archivos de propiedad
         this.propertyFileSchema = Joi.object({
             property_id: Joi.number().required(),
             file_type: Joi.string().valid('image', 'document', 'video').required(),
@@ -23,12 +21,11 @@ class PropertyService {
             usuario_id: Joi.number().required(),
             nombre_propiedad: Joi.string().max(200).required(),
             descripcion: Joi.string().max(1000).allow(''),
-            precio: Joi.number().min(10000).required(),
+            precio: Joi.number().min(0).required(),
             ubicacion: Joi.string().max(255).required(),
-            tamano: Joi.string().max(100).allow(''),
+            superficie: Joi.string().max(100).allow(''),
+            dimensiones: Joi.string().max(100).allow(''),
             tipo_propiedad: Joi.string().valid('casa', 'departamento', 'terreno', 'oficina', 'local').default('casa'),
-            dormitorios: Joi.number().min(0).max(20).default(0),
-            banos: Joi.number().min(0).max(10).default(0),
             estado: Joi.number().valid(0, 1).default(1)
         });
 
@@ -48,24 +45,14 @@ class PropertyService {
                 throw new Error(`Validación fallida: ${error.details[0].message}`);
             }
 
-            // Enviar a base de datos
-            const response = await axios.post(
-                `${this.databaseUrl}/api/properties`,
-                value,
-                { timeout: 10000 }
-            );
-
-            if (response.data.success) {
-                const property = response.data.data;
-                
-                // Limpiar cache
-                this.clearCache();
-                
-                console.log('✅ Propiedad creada:', property.id);
-                return property;
-            } else {
-                throw new Error(response.data.error || 'Error creando propiedad');
-            }
+            // Crear en base de datos usando el modelo directamente
+            const property = await this.model.create(value);
+            
+            // Limpiar cache
+            this.clearCache();
+            
+            console.log('✅ Propiedad creada:', property.id);
+            return property;
 
         } catch (error) {
             console.error('❌ Error creando propiedad:', error.message);
@@ -95,22 +82,14 @@ class PropertyService {
                 throw new Error(`Validación fallida: ${error.details[0].message}`);
             }
 
-            // Enviar actualización
-            const response = await axios.put(
-                `${this.databaseUrl}/api/properties/${propertyId}`,
-                value,
-                { timeout: 10000 }
-            );
-
-            if (response.data.success) {
-                // Limpiar cache
-                this.clearCache();
-                
-                console.log('✅ Propiedad actualizada');
-                return response.data.data;
-            } else {
-                throw new Error(response.data.error || 'Error actualizando propiedad');
-            }
+            // Actualizar usando el modelo directamente
+            const updatedProperty = await this.model.update(propertyId, value);
+            
+            // Limpiar cache
+            this.clearCache();
+            
+            console.log('✅ Propiedad actualizada');
+            return updatedProperty;
 
         } catch (error) {
             console.error('❌ Error actualizando propiedad:', error.message);
@@ -138,21 +117,14 @@ class PropertyService {
                 throw new Error(`Propiedad ${propertyId} no encontrada`);
             }
     
-            // Marcar como eliminada (soft delete)
-            const response = await axios.delete(
-                `${this.databaseUrl}/api/properties/${id}`,
-                { timeout: 10000 }
-            );
-    
-            if (response.data.success) {
-                // Limpiar cache
-                this.clearCache();
-                
-                console.log('✅ Propiedad eliminada');
-                return true;
-            } else {
-                throw new Error(response.data.error || 'Error eliminando propiedad');
-            }
+            // Marcar como eliminada (soft delete) usando el modelo
+            await this.model.softDelete(id);
+            
+            // Limpiar cache
+            this.clearCache();
+            
+            console.log('✅ Propiedad eliminada');
+            return true;
     
         } catch (error) {
             console.error('❌ Error eliminando propiedad:', error.message);
@@ -193,15 +165,10 @@ class PropertyService {
                 }
             }
     
-            // Buscar en base de datos
-            const response = await axios.get(
-                `${this.databaseUrl}/api/properties/${id}`,
-                { timeout: 10000 }
-            );
-    
-            if (response.data.success) {
-                const property = response.data.data;
-                
+            // Buscar en base de datos usando el modelo directamente
+            const property = await this.model.findById(id);
+            
+            if (property) {
                 // Guardar en cache
                 this.cache.set(cacheKey, {
                     data: property,
@@ -214,11 +181,8 @@ class PropertyService {
             }
     
         } catch (error) {
-            if (error.response?.status === 404) {
-                return null;
-            }
             console.error('❌ Error obteniendo propiedad:', error.message);
-            throw error;
+            return null;
         }
     }
 
@@ -227,19 +191,13 @@ class PropertyService {
         console.log('📋 Listando propiedades');
 
         try {
-            const response = await axios.get(
-                `${this.databaseUrl}/api/properties`,
-                {
-                    params: filters,
-                    timeout: 10000
-                }
-            );
-
-            if (response.data.success) {
-                return response.data.data;
-            } else {
-                throw new Error(response.data.error || 'Error listando propiedades');
+            // Si no hay filtros, devolver todas
+            if (!filters || Object.keys(filters).length === 0) {
+                return await this.model.findAll();
             }
+            
+            // Si hay filtros, usar búsqueda personalizada
+            return await this.model.findByMultipleFilters(filters);
 
         } catch (error) {
             console.error('❌ Error listando propiedades:', error.message);
@@ -247,25 +205,74 @@ class PropertyService {
         }
     }
 
-    // Buscar propiedades con filtros
-    async search(filters) {
-        console.log('🔍 Buscando propiedades con filtros:', filters);
+    // Buscar TODAS las propiedades (sin filtros)
+    async searchAll() {
+        console.log('🔍 Buscando TODAS las propiedades del sistema');
 
         try {
-            const response = await axios.post(
-                `${this.databaseUrl}/api/properties/search`,
-                filters,
-                { timeout: 10000 }
-            );
-
-            if (response.data.success) {
-                return response.data.data;
-            } else {
-                return [];
-            }
-
+            return await this.model.findAll();
         } catch (error) {
-            console.error('❌ Error buscando propiedades:', error.message);
+            console.error('❌ Error buscando todas las propiedades:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar MIS propiedades (por usuario_id)
+    async searchByUserId(usuario_id) {
+        console.log('🔍 Buscando MIS propiedades para usuario:', usuario_id);
+
+        try {
+            return await this.model.findByUserId(usuario_id);
+        } catch (error) {
+            console.error('❌ Error buscando mis propiedades:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar propiedades por PRECIO MÁXIMO
+    async searchByMaxPrice(precio_max) {
+        console.log('🔍 Buscando propiedades por precio máximo:', precio_max);
+
+        try {
+            return await this.model.findByMaxPrice(precio_max);
+        } catch (error) {
+            console.error('❌ Error buscando propiedades por precio:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar propiedades por UBICACIÓN
+    async searchByLocation(ubicacion) {
+        console.log('🔍 Buscando propiedades por ubicación:', ubicacion);
+
+        try {
+            return await this.model.findByLocation(ubicacion);
+        } catch (error) {
+            console.error('❌ Error buscando propiedades por ubicación:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar propiedades por TIPO
+    async searchByType(tipo_propiedad) {
+        console.log('🔍 Buscando propiedades por tipo:', tipo_propiedad);
+
+        try {
+            return await this.model.findByType(tipo_propiedad);
+        } catch (error) {
+            console.error('❌ Error buscando propiedades por tipo:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar propiedades con filtros MÚLTIPLES (búsqueda personalizada)
+    async searchCustom(filters) {
+        console.log('🔍 Búsqueda personalizada con filtros:', filters);
+
+        try {
+            return await this.model.findByMultipleFilters(filters);
+        } catch (error) {
+            console.error('❌ Error en búsqueda personalizada:', error.message);
             return [];
         }
     }
@@ -275,20 +282,7 @@ class PropertyService {
         console.log('👤 Obteniendo propiedades del agente:', agentId);
 
         try {
-            const response = await axios.get(
-                `${this.databaseUrl}/api/properties`,
-                {
-                    params: { usuario_id: agentId },
-                    timeout: 10000
-                }
-            );
-
-            if (response.data.success) {
-                return response.data.data;
-            } else {
-                return [];
-            }
-
+            return await this.model.findByUserId(agentId);
         } catch (error) {
             console.error('❌ Error obteniendo propiedades del agente:', error.message);
             return [];
@@ -407,10 +401,58 @@ class PropertyService {
         return Math.round(total / properties.length);
     }
 
+    // Buscar propiedades con filtros (función general)
+    async searchProperties(filters = {}) {
+        console.log('🔍 Búsqueda general de propiedades:', filters);
+
+        try {
+            // Si no hay filtros, devolver todas las propiedades
+            if (!filters || Object.keys(filters).length === 0) {
+                return await this.model.findAll();
+            }
+
+            // Si solo hay precio_max, usar búsqueda específica
+            if (filters.precio_max && Object.keys(filters).length === 1) {
+                return await this.model.findByMaxPrice(filters.precio_max);
+            }
+
+            // Si solo hay ubicacion, usar búsqueda específica  
+            if (filters.ubicacion && Object.keys(filters).length === 1) {
+                return await this.model.findByLocation(filters.ubicacion);
+            }
+
+            // Si solo hay tipo, usar búsqueda específica
+            if (filters.tipo_propiedad && Object.keys(filters).length === 1) {
+                return await this.model.findByType(filters.tipo_propiedad);
+            }
+
+            // Para filtros múltiples, usar búsqueda personalizada
+            return await this.model.findByMultipleFilters(filters);
+
+        } catch (error) {
+            console.error('❌ Error en searchProperties:', error.message);
+            return [];
+        }
+    }
+
     // Limpiar cache
     clearCache() {
         this.cache.clear();
         console.log('🗑️ Cache de propiedades limpiado');
+    }
+
+    // Alias methods for compatibility with routes
+    async getPropertyById(propertyId) {
+        return await this.getById(propertyId);
+    }
+
+    async createProperty(propertyData) {
+        return await this.create(propertyData);
+    }
+
+    async deleteProperty(propertyId) {
+        const result = await this.delete(propertyId);
+        return result;
     }
 }
 

@@ -17,14 +17,52 @@ class UserValidator {
             // 1. Limpiar número de teléfono
             const cleanPhone = this.cleanPhoneNumber(phoneNumber);
             
-            // 2. Verificar cache primero
+            // 2. NUEVA LÓGICA: Verificar sesión persistente primero (vía Database Module)
+            try {
+                const sessionResponse = await axios.post(`${this.databaseUrl}/api/sessions/validate`, {
+                    phoneNumber: cleanPhone
+                }, {
+                    timeout: this.timeout,
+                    headers: {
+                        'X-Source': 'processing-module'
+                    }
+                });
+
+                if (sessionResponse.data.success && sessionResponse.data.data.valid) {
+                    const sessionData = sessionResponse.data.data;
+                    
+                    const validationResult = {
+                        isValid: true,
+                        userData: sessionData.user,
+                        timestamp: Date.now(),
+                        fromSession: sessionData.fromCache, // true = sesión existente, false = nueva sesión
+                        sessionId: sessionData.session?._id
+                    };
+
+                    // También guardar en cache local como backup
+                    this.cache.set(cleanPhone, validationResult);
+
+                    if (sessionData.fromCache) {
+                        console.log('✅ Usuario válido desde sesión (Database Module):', sessionData.user.nombre);
+                    } else {
+                        console.log('✅ Usuario validado y nueva sesión creada (Database Module):', sessionData.user.nombre);
+                    }
+
+                    return validationResult;
+                }
+            } catch (sessionError) {
+                console.warn('⚠️ Error consultando sesión vía Database Module, usando fallback:', sessionError.message);
+                // Continuar con el fallback si el Database Module falla
+            }
+
+            // 3. FALLBACK: Cache local (solo si MongoDB no está disponible)
             const cacheKey = cleanPhone;
             if (this.cache.has(cacheKey)) {
                 const cached = this.cache.get(cacheKey);
                 
                 // Verificar si el cache no ha expirado
                 if (Date.now() - cached.timestamp < this.cacheTimeout) {
-                    console.log('✅ Usuario encontrado en cache:', cached.data?.nombre);
+                    console.log('✅ Usuario encontrado en cache local (fallback):', cached.userData?.nombre);
                     return cached;
                 }
                 
@@ -32,25 +70,27 @@ class UserValidator {
                 this.cache.delete(cacheKey);
             }
 
-            // 3. Consultar base de datos
+            // 4. FALLBACK: Consulta directa a PostgreSQL (último recurso)
             const response = await axios.get(`${this.databaseUrl}/api/users/validate/${cleanPhone}`, {
                 timeout: this.timeout,
                 headers: {
-                    'X-Source': 'processing-module'
+                    'X-Source': 'processing-module-fallback'
                 }
             });
 
             const validationResult = {
                 isValid: response.data.valid || false,
                 userData: response.data.data || null,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                fromSession: false,
+                method: 'fallback-direct'
             };
 
-            // 4. Guardar en cache
+            // Guardar en cache local
             this.cache.set(cacheKey, validationResult);
 
             if (validationResult.isValid) {
-                console.log('✅ Usuario válido:', validationResult.userData.nombre);
+                console.log('✅ Usuario válido (método directo):', validationResult.userData.nombre);
             } else {
                 console.log('❌ Usuario no encontrado en sistema');
             }
@@ -65,7 +105,8 @@ class UserValidator {
                 isValid: false,
                 userData: null,
                 error: error.message,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                method: 'error'
             };
         }
     }
@@ -110,8 +151,17 @@ class UserValidator {
         
         // Definir permisos por rol
         const rolePermissions = {
-            'gerente': ['create_property', 'update_property', 'delete_property', 'create_agent', 'update_agent', 'create_client', 'view_reports'],
-            'agente': ['create_property', 'update_property', 'create_client', 'view_own_properties']
+            'gerente': [
+                'create_property', 'update_property', 'delete_property', 'search_properties',
+                'create_agent', 'update_agent', 'toggle_agent', 'list_agents', 
+                'create_client', 'update_client', 'delete_client', 'list_clients',
+                'view_reports', 'daily_report', 'monthly_report'
+            ],
+            'agente': [
+                'create_property', 'update_property', 'search_properties',
+                'create_client', 'update_client', 'list_clients',
+                'view_own_properties'
+            ]
         };
 
         const userPermissions = rolePermissions[userRole] || [];

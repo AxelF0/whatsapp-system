@@ -31,6 +31,7 @@ app.locals.sessionManager = sessionManager;
 app.locals.messageProcessor = messageProcessor;
 app.locals.gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:3000';
 app.locals.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
+app.locals.processingUrl = process.env.PROCESSING_URL || 'http://localhost:3002';
 
 // ==================== RUTAS DE INICIALIZACIÓN ====================
 
@@ -153,6 +154,43 @@ app.post('/api/sessions/:sessionType/restart', async (req, res) => {
         res.json({
             success: true,
             message: `Sesión ${sessionType} reiniciada correctamente`
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Diagnosticar problemas de sesiones
+app.get('/api/sessions/diagnose', async (req, res) => {
+    try {
+        const diagnosis = await sessionManager.diagnoseSessions();
+        
+        res.json({
+            success: true,
+            data: diagnosis,
+            message: 'Diagnóstico de sesiones completado'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Limpiar archivos de autenticación (útil cuando las sesiones se cuelgan)
+app.post('/api/sessions/clear-auth', async (req, res) => {
+    try {
+        await sessionManager.clearAuthSessions();
+        
+        res.json({
+            success: true,
+            message: 'Archivos de autenticación limpiados. Reinicia las sesiones.'
         });
 
     } catch (error) {
@@ -329,7 +367,8 @@ async function startMultiSessionWhatsApp() {
         // Configurar procesador de mensajes
         messageProcessor.configure({
             gatewayUrl: app.locals.gatewayUrl,
-            databaseUrl: app.locals.databaseUrl
+            databaseUrl: app.locals.databaseUrl,
+            processingUrl: app.locals.processingUrl
         });
 
         // Configurar el manejador de mensajes para las sesiones
@@ -342,6 +381,9 @@ async function startMultiSessionWhatsApp() {
             console.log('   POST /api/initialize - Inicializar sesiones');
             console.log('   GET  /api/sessions/:type/qr - Obtener QR');
             console.log('   GET  /api/sessions/status - Estado de sesiones');
+            console.log('   GET  /api/sessions/diagnose - Diagnosticar problemas');
+            console.log('   POST /api/sessions/clear-auth - Limpiar archivos auth');
+            console.log('   POST /api/sessions/:type/restart - Reiniciar sesión');
             console.log('   POST /api/agent/send - Enviar desde agente');
             console.log('   POST /api/system/send - Enviar desde sistema');
             console.log('   GET  /api/health - Estado del módulo');

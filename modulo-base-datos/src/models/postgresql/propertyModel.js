@@ -18,9 +18,7 @@ class PropertyModel {
             propertyData.descripcion || null,
             propertyData.precio,
             propertyData.ubicacion,
-            // superficie puede venir como tamano o superficie
             propertyData.superficie || propertyData.tamano || null,
-            // dimensiones opcional
             propertyData.dimensiones || null,
             propertyData.tipo_propiedad || null,
             propertyData.estado || 1
@@ -29,8 +27,88 @@ class PropertyModel {
         return result.rows[0];
     }
 
-    // Buscar propiedades por filtros
-    async findByFilters(filters) {
+    // Buscar TODAS las propiedades del sistema (sin filtros)
+    async findAll() {
+        const query = `
+            SELECT p.*, u.nombre as agente_nombre, u.apellido as agente_apellido,
+                   array_agg(pa.url) as archivos
+            FROM Propiedad p 
+            JOIN Usuario u ON p.usuario_id = u.id
+            LEFT JOIN Propiedad_archivo pa ON p.id = pa.propiedad_id AND pa.estado = 1
+            WHERE p.estado = 1
+            GROUP BY p.id, u.nombre, u.apellido 
+            ORDER BY p.fecha_creacion DESC
+        `;
+        const result = await this.client.query(query);
+        return result.rows;
+    }
+
+    // Buscar MIS propiedades (por usuario_id)
+    async findByUserId(usuario_id) {
+        const query = `
+            SELECT p.*, u.nombre as agente_nombre, u.apellido as agente_apellido,
+                   array_agg(pa.url) as archivos
+            FROM Propiedad p 
+            JOIN Usuario u ON p.usuario_id = u.id
+            LEFT JOIN Propiedad_archivo pa ON p.id = pa.propiedad_id AND pa.estado = 1
+            WHERE p.estado = 1 AND p.usuario_id = $1
+            GROUP BY p.id, u.nombre, u.apellido 
+            ORDER BY p.fecha_creacion DESC
+        `;
+        const result = await this.client.query(query, [usuario_id]);
+        return result.rows;
+    }
+
+    // Buscar propiedades por PRECIO MÁXIMO
+    async findByMaxPrice(precio_max) {
+        const query = `
+            SELECT p.*, u.nombre as agente_nombre, u.apellido as agente_apellido,
+                   array_agg(pa.url) as archivos
+            FROM Propiedad p 
+            JOIN Usuario u ON p.usuario_id = u.id
+            LEFT JOIN Propiedad_archivo pa ON p.id = pa.propiedad_id AND pa.estado = 1
+            WHERE p.estado = 1 AND p.precio <= $1
+            GROUP BY p.id, u.nombre, u.apellido 
+            ORDER BY p.precio ASC
+        `;
+        const result = await this.client.query(query, [precio_max]);
+        return result.rows;
+    }
+
+    // Buscar propiedades por UBICACIÓN
+    async findByLocation(ubicacion) {
+        const query = `
+            SELECT p.*, u.nombre as agente_nombre, u.apellido as agente_apellido,
+                   array_agg(pa.url) as archivos
+            FROM Propiedad p 
+            JOIN Usuario u ON p.usuario_id = u.id
+            LEFT JOIN Propiedad_archivo pa ON p.id = pa.propiedad_id AND pa.estado = 1
+            WHERE p.estado = 1 AND p.ubicacion ILIKE $1
+            GROUP BY p.id, u.nombre, u.apellido 
+            ORDER BY p.fecha_creacion DESC
+        `;
+        const result = await this.client.query(query, [`%${ubicacion}%`]);
+        return result.rows;
+    }
+
+    // Buscar propiedades por TIPO
+    async findByType(tipo_propiedad) {
+        const query = `
+            SELECT p.*, u.nombre as agente_nombre, u.apellido as agente_apellido,
+                   array_agg(pa.url) as archivos
+            FROM Propiedad p 
+            JOIN Usuario u ON p.usuario_id = u.id
+            LEFT JOIN Propiedad_archivo pa ON p.id = pa.propiedad_id AND pa.estado = 1
+            WHERE p.estado = 1 AND p.tipo_propiedad = $1
+            GROUP BY p.id, u.nombre, u.apellido 
+            ORDER BY p.fecha_creacion DESC
+        `;
+        const result = await this.client.query(query, [tipo_propiedad]);
+        return result.rows;
+    }
+
+    // Buscar propiedades con MÚLTIPLES FILTROS (búsqueda personalizada)
+    async findByMultipleFilters(filters) {
         let query = `
             SELECT p.*, u.nombre as agente_nombre, u.apellido as agente_apellido,
                    array_agg(pa.url) as archivos
@@ -41,12 +119,6 @@ class PropertyModel {
         `;
         const values = [];
         let paramCount = 1;
-
-        if (filters.precio_min) {
-            query += ` AND p.precio >= $${paramCount}`;
-            values.push(filters.precio_min);
-            paramCount++;
-        }
 
         if (filters.precio_max) {
             query += ` AND p.precio <= $${paramCount}`;
@@ -65,8 +137,6 @@ class PropertyModel {
             values.push(filters.tipo_propiedad);
             paramCount++;
         }
-
-        // El esquema no tiene dormitorios/banos, por lo que omitimos ese filtro
 
         query += ` GROUP BY p.id, u.nombre, u.apellido ORDER BY p.fecha_creacion DESC`;
 
@@ -104,6 +174,40 @@ class PropertyModel {
             RETURNING *
         `;
         const values = [propertyId, fileData.nombre_archivo, fileData.url, fileData.tipo_archivo];
+        const result = await this.client.query(query, values);
+        return result.rows[0];
+    }
+
+    // Actualizar propiedad
+    async update(id, updates) {
+        const fields = [];
+        const values = [];
+        let paramCount = 1;
+
+        // Construir dinámicamente la query según los campos a actualizar
+        for (const [key, value] of Object.entries(updates)) {
+            if (value !== undefined && ['nombre_propiedad', 'descripcion', 'precio', 'ubicacion', 'superficie', 'dimensiones', 'tipo_propiedad', 'estado'].includes(key)) {
+                fields.push(`${key} = $${paramCount}`);
+                values.push(value);
+                paramCount++;
+            }
+        }
+
+        if (fields.length === 0) {
+            throw new Error('No hay campos válidos para actualizar');
+        }
+
+        // Agregar fecha de modificación y el ID
+        fields.push(`fecha_modificacion = CURRENT_TIMESTAMP`);
+        values.push(id);
+
+        const query = `
+            UPDATE Propiedad
+            SET ${fields.join(', ')}
+            WHERE id = $${paramCount}
+            RETURNING *
+        `;
+
         const result = await this.client.query(query, values);
         return result.rows[0];
     }

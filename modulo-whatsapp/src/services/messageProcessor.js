@@ -6,6 +6,7 @@ class MessageProcessor {
     constructor() {
         this.gatewayUrl = null;
         this.databaseUrl = null;
+        this.processingUrl = null;
         this.retryAttempts = 3;
         this.retryDelay = 1000;
 
@@ -22,10 +23,12 @@ class MessageProcessor {
     configure(config) {
         this.gatewayUrl = config.gatewayUrl;
         this.databaseUrl = config.databaseUrl;
+        this.processingUrl = config.processingUrl;
 
         console.log('🔧 MessageProcessor configurado:');
         console.log(`   Gateway: ${this.gatewayUrl}`);
         console.log(`   Database: ${this.databaseUrl}`);
+        console.log(`   Processing: ${this.processingUrl}`);
     }
 
     // Procesar mensaje de cliente (recibido en sesión AGENTE)
@@ -179,9 +182,16 @@ class MessageProcessor {
         try {
             // Enviar todo al endpoint de procesamiento de mensajes
             const endpoint = '/api/process/message';
-            const processingUrl = process.env.PROCESSING_URL || 'http://localhost:3002';
+            const processingUrl = this.processingUrl || 'http://localhost:3002';
 
-            console.log(`📡 Enviando al módulo de procesamiento: ${processingUrl}${endpoint}`);
+            console.log(`📡 ENVIANDO AL MÓDULO DE PROCESAMIENTO:`);
+            console.log(`   🌐 URL: ${processingUrl}${endpoint}`);
+            console.log(`   📦 Data:`, JSON.stringify({
+                from: messageData.from,
+                body: messageData.body,
+                messageType: messageType,
+                sessionType: messageData.sessionType
+            }, null, 2));
 
             const response = await axios.post(
                 `${processingUrl}${endpoint}`,
@@ -199,10 +209,17 @@ class MessageProcessor {
                 }
             );
 
+            console.log(`✅ RESPUESTA DEL PROCESAMIENTO:`, response.data);
             return response.data;
 
         } catch (error) {
-            console.error(`❌ Intento ${attempt} falló:`, error.message);
+            console.error(`❌ INTENTO ${attempt} FALLÓ:`);
+            console.error(`   🔗 URL: ${this.processingUrl || 'http://localhost:3002'}${endpoint}`);
+            console.error(`   ❌ Error: ${error.message}`);
+            
+            if (error.code === 'ECONNREFUSED') {
+                console.error(`   🔌 CONEXIÓN RECHAZADA - ¿Está ejecutándose el módulo de procesamiento?`);
+            }
 
             if (attempt < this.retryAttempts) {
                 console.log(`🔄 Reintentando en ${this.retryDelay}ms... (${attempt}/${this.retryAttempts})`);
@@ -210,7 +227,7 @@ class MessageProcessor {
                 await this.sleep(this.retryDelay);
                 return this.sendToGateway(messageData, messageType, attempt + 1);
             } else {
-                throw new Error(`Gateway no disponible después de ${this.retryAttempts} intentos`);
+                throw new Error(`Módulo de procesamiento no disponible después de ${this.retryAttempts} intentos: ${error.message}`);
             }
         }
     }
@@ -239,20 +256,16 @@ class MessageProcessor {
 
     // Limpiar número de teléfono
     cleanPhoneNumber(phone) {
-        // Eliminar caracteres no numéricos
-        let cleaned = phone.replace(/\D/g, '');
+        // Remover @c.us si está presente ANTES de eliminar otros caracteres
+        let cleaned = phone.replace('@c.us', '');
+        
+        // Eliminar caracteres no numéricos 
+        cleaned = cleaned.replace(/\D/g, '');
 
-        // Remover @c.us si está presente
-        cleaned = cleaned.replace('@c.us', '');
-
-        // Asegurar formato con código de país (Bolivia 591)
-        if (!cleaned.startsWith('591')) {
-            // Si empieza con 7 u 8 (números móviles Bolivia), agregar 591
-            if (cleaned.match(/^[678]/)) {
-                cleaned = '591' + cleaned;
-            }
-        }
-
+        // Los números en BD empiezan con '59' (Bolivia), no '591'
+        // No necesitamos agregar código de país adicional
+        console.log(`📞 Número limpiado: ${phone} → ${cleaned}`);
+        
         return cleaned;
     }
 
