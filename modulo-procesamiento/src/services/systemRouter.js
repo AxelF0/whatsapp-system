@@ -1,14 +1,12 @@
 // servidor/modulo-procesamiento/src/services/systemRouter.js
 
 const axios = require('axios');
-const MenuManager = require('./menuManager');
 
 class SystemRouter {
     constructor() {
         this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3004';
         this.responsesUrl = process.env.RESPONSES_URL || 'http://localhost:3005';
         this.timeout = 15000; // 15 segundos
-        this.menuManager = new MenuManager();
         this.maxRetries = 3;
         this.retryDelay = 1000;
     }
@@ -66,7 +64,7 @@ class SystemRouter {
         }
     }
 
-    // Rutear comando de sistema al backend
+    // Rutear comando de sistema al backend (Opción 3 - Backend maneja todo)
     async routeToBackend(messageData, analysis) {
         console.log('⚙️ Procesando entrada del sistema:', {
             user: analysis.userData.nombre,
@@ -74,139 +72,91 @@ class SystemRouter {
         });
 
         try {
-            // Usar el MenuManager para procesar la entrada
-            const menuResult = await this.menuManager.processInput(
-                analysis.userData.id,
-                analysis.userData.cargo_nombre,
-                messageData.body,
-                analysis.userData
+            // Enviar todo al Backend para que procese con su MenuManager
+            const backendRequest = {
+                messageData: {
+                    body: messageData.body,
+                    messageId: messageData.messageId
+                },
+                user: {
+                    phone: analysis.userPhone,
+                    name: analysis.userData.nombre,
+                    role: analysis.userData.cargo_nombre,
+                    id: analysis.userData.id,
+                    userData: analysis.userData
+                },
+                timestamp: new Date().toISOString(),
+                source: 'processing-module'
+            };
+
+            // Enviar al backend para procesamiento completo
+            console.log(`📡 Enviando al Backend: ${this.backendUrl}/api/system/process`);
+            const backendResponse = await axios.post(
+                `${this.backendUrl}/api/system/process`,
+                backendRequest,
+                {
+                    timeout: this.timeout,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Source': 'processing-module'
+                    }
+                }
             );
 
-            // Preparar respuesta para el módulo de respuestas (solo si no hay comando)
-            if (menuResult.message && !menuResult.executeCommand) {
+            // El Backend procesa todo y envía directamente al módulo de Respuestas
+            if (backendResponse.data && backendResponse.data.success && backendResponse.data.processed) {
+                console.log('✅ Backend procesó y envió respuesta al usuario');
+                
+                return {
+                    action: 'backend_processed',
+                    processed: true,
+                    message: backendResponse.data.message || 'Mensaje procesado por Backend'
+                };
+            }
+
+            return {
+                action: 'no_response_from_backend',
+                processed: false,
+                error: 'Backend no devolvió respuesta válida'
+            };
+
+        } catch (error) {
+            console.error('❌ Error comunicándose con Backend:', error.message);
+            
+            // Error de conectividad con el backend
+            if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
                 await this.sendToResponses({
                     to: analysis.userPhone,
-                    message: menuResult.message,
+                    message: '⚠️ El sistema está temporalmente no disponible. Intenta de nuevo en unos momentos.',
                     type: 'text',
                     metadata: {
                         messageId: messageData.messageId,
                         userId: analysis.userData.id,
-                        userRole: analysis.userData.cargo_nombre
+                        error: 'backend_connection_error'
                     }
                 });
-            }
-
-            // Si hay un comando para ejecutar
-            if (menuResult.executeCommand) {
-                const backendRequest = {
-                    command: menuResult.executeCommand,
-                    user: {
-                        phone: analysis.userPhone,
-                        name: analysis.userData.nombre,
-                        role: analysis.userData.cargo_nombre,
-                        id: analysis.userData.id
-                    },
-                    timestamp: new Date().toISOString(),
-                    messageId: messageData.messageId
-                };
-
-                // Enviar al backend
-                const backendResponse = await this.sendToBackend(backendRequest);
-
-                // Siempre enviar la respuesta del backend si existe
-                if (backendResponse && backendResponse.message) {
-                    await this.sendToResponses({
-                        to: analysis.userPhone,
-                        message: backendResponse.message,
-                        type: 'text',
-                        metadata: {
-                            messageId: messageData.messageId,
-                            userId: analysis.userData.id,
-                            userRole: analysis.userData.cargo_nombre
-                        }
-                    });
-                }
-
-                // Si es una lista para selección, enviar mensaje de seguimiento
-                if (menuResult.executeCommand.parameters && 
-                    menuResult.executeCommand.parameters.forSelection) {
-                    
-                    // Determinar el mensaje de seguimiento según el tipo
-                    let followupMessage = '';
-                    if (menuResult.executeCommand.type === 'list_clients') {
-                        followupMessage = '🔍 Ahora ingresa el ID o teléfono del cliente que deseas modificar:';
-                    } else if (menuResult.executeCommand.type === 'list_properties') {
-                        // Determinar si es para modificar o agregar archivo basado en la acción actual
-                        const session = this.menuManager.getSession(analysis.userData.id);
-                        if (session && session.currentAction === 'ADD_FILE') {
-                            followupMessage = '🔍 Ahora ingresa el ID de la propiedad a la que deseas agregar el archivo:';
-                        } else {
-                            followupMessage = '🔍 Ahora ingresa el ID de la propiedad que deseas modificar:';
-                        }
-                    } else if (menuResult.executeCommand.type === 'list_agents') {
-                        // Determinar si es para modificar o dar de baja/alta basado en la acción actual
-                        const session = this.menuManager.getSession(analysis.userData.id);
-                        if (session && session.currentAction === 'MODIFY_AGENT') {
-                            followupMessage = '🔍 Ahora ingresa el ID o teléfono del agente que deseas modificar:';
-                        } else if (session && session.currentAction === 'TOGGLE_AGENT') {
-                            followupMessage = '🔍 Ahora ingresa el ID o teléfono del agente que deseas activar/desactivar:';
-                        }
-                    }
-
-                    if (followupMessage) {
-                        await this.sendToResponses({
-                            to: analysis.userPhone,
-                            message: followupMessage,
-                            type: 'text',
-                            metadata: {
-                                messageId: messageData.messageId,
-                                userId: analysis.userData.id,
-                                userRole: analysis.userData.cargo_nombre
-                            }
-                        });
-                    }
-
-                    return {
-                        action: 'list_with_continuation',
-                        processed: true,
-                        menuResponse: menuResult,
-                        backendResponse: backendResponse,
-                        continuationSent: true
-                    };
-                }
-
-                // Combinar respuesta del menú con la del backend (flujo normal)
+                
                 return {
-                    action: 'menu_and_command',
+                    action: 'connection_error',
                     processed: true,
-                    menuResponse: menuResult,
-                    backendResponse: backendResponse,
-                    finalMessage: this.combineResponses(menuResult, backendResponse)
+                    error: error.message
                 };
             }
-
-            // Solo navegación de menú (sin comando) - ya se envió arriba
-            // No enviar duplicado
+            
+            // Otros errores del backend
+            await this.sendToResponses({
+                to: analysis.userPhone,
+                message: '❌ Error procesando tu solicitud. Por favor intenta de nuevo.',
+                type: 'text',
+                metadata: {
+                    messageId: messageData.messageId,
+                    userId: analysis.userData.id,
+                    error: 'backend_processing_error'
+                }
+            });
 
             return {
-                action: 'menu_navigation',
-                processed: true,
-                response: menuResult.message,
-                showMenu: menuResult.showMenu
-            };
-
-        } catch (error) {
-            console.error('❌ Error en sistema:', error.message);
-            
-            // Solo enviar error genérico si es error de comunicación/sistema
-            // Los errores de validación/lógica ya los maneja el backend
-            if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
-                return this.sendErrorResponse(messageData, analysis, 'Problema de conexión con el sistema. Intenta de nuevo.');
-            }
-            
-            // Para otros errores, el backend ya envió su mensaje específico
-            return {
-                action: 'error_handled_by_backend',
+                action: 'backend_error',
                 processed: true,
                 error: error.message
             };

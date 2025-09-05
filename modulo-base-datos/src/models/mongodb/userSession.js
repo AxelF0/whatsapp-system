@@ -35,8 +35,7 @@ const userSessionSchema = new mongoose.Schema({
     },
     expiresAt: {
         type: Date,
-        default: () => new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
-        index: { expireAfterSeconds: 0 }
+        default: () => new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 horas
     },
     menuState: {
         current: { type: String, default: 'MAIN' },
@@ -50,9 +49,9 @@ const userSessionSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Índice compuesto para consultas eficientes
+// Índices para consultas eficientes y TTL
 userSessionSchema.index({ phoneNumber: 1, isActive: 1 });
-userSessionSchema.index({ expiresAt: 1 });
+userSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 }); // Limpieza cada 7 días
 
 // Middleware para actualizar lastActivity
 userSessionSchema.pre('save', function(next) {
@@ -68,8 +67,8 @@ userSessionSchema.methods.isExpired = function() {
 };
 
 // Método para extender la sesión
-userSessionSchema.methods.extend = function(minutes = 30) {
-    this.expiresAt = new Date(Date.now() + minutes * 60 * 1000);
+userSessionSchema.methods.extend = function(hours = 24) {
+    this.expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
     this.lastActivity = new Date();
     this.activityCount += 1;
     return this.save();

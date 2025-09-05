@@ -342,7 +342,26 @@ class CommandProcessor {
         const params = commandData.command.parameters;
         const filters = params.filters || {};
 
-        const properties = await this.propertyService.search(filters);
+        console.log('📋 handleListProperties - Filtros recibidos:', filters);
+        console.log('📋 handleListProperties - Usuario ID:', commandData.user?.id);
+        
+        if (filters.usuario_id) {
+            console.log(`🎯 FILTRO CRÍTICO: Buscando propiedades del usuario ID ${filters.usuario_id}`);
+            console.log(`   Según la DB deberías tener: Usuario 4 = 2 propiedades, Usuario 1 = 4 propiedades`);
+        }
+
+        const properties = await this.propertyService.list(filters);
+
+        console.log(`📋 handleListProperties - Propiedades encontradas: ${properties.length}`);
+        
+        if (filters.usuario_id && properties.length > 0) {
+            console.log('🏠 Lista de propiedades encontradas:');
+            properties.forEach((prop, index) => {
+                console.log(`   ${index + 1}. ${prop.nombre_propiedad} (ID: ${prop.id}, Usuario: ${prop.usuario_id})`);
+            });
+        } else if (filters.usuario_id && properties.length === 0) {
+            console.log(`❌ NO SE ENCONTRARON propiedades para el usuario ${filters.usuario_id}`);
+        }
 
         if (properties.length === 0) {
             return {
@@ -654,8 +673,9 @@ class CommandProcessor {
                 console.log('📊 Método: TODAS las propiedades');
             } else if (filters.usuario_id) {
                 // Con usuario_id = MIS propiedades
-                properties = await this.propertyService.searchByUserId(filters.usuario_id);
-                console.log('📊 Método: MIS propiedades');
+                console.log(`📊 Método: MIS propiedades para usuario ID: ${filters.usuario_id}`);
+                properties = await this.propertyService.getByAgent(filters.usuario_id);
+                console.log(`✅ Encontradas ${properties.length} propiedades del usuario ${filters.usuario_id}`);
             } else if (filters.precio_max && Object.keys(filters).length === 1) {
                 // Solo precio = búsqueda por precio máximo
                 properties = await this.propertyService.searchByMaxPrice(filters.precio_max);
@@ -919,7 +939,10 @@ class CommandProcessor {
             if (!isNaN(identifier)) {
                 try {
                     // Buscar todos los usuarios y filtrar por ID
-                    const response = await axios.get(`${this.databaseUrl}/api/users`, { timeout: 10000 });
+                    const response = await axios.get(`${this.databaseUrl}/api/users`, { 
+                        timeout: 15000,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
                     if (response.data.success) {
                         user = response.data.data.find(u => u.id === parseInt(identifier));
                     }
@@ -928,27 +951,33 @@ class CommandProcessor {
                     if (!user) {
                         const phoneResponse = await axios.get(
                             `${this.databaseUrl}/api/users/validate/${identifier}`,
-                            { timeout: 10000 }
+                            { 
+                                timeout: 15000,
+                                headers: { 'Content-Type': 'application/json' }
+                            }
                         );
                         if (phoneResponse.data.valid) {
                             user = phoneResponse.data.data;
                         }
                     }
                 } catch (error) {
-                    console.log('Error buscando por ID, intentando por teléfono');
+                    console.log('Error buscando por ID, intentando por teléfono:', error.message);
                 }
             } else {
                 // Buscar por teléfono
                 try {
                     const response = await axios.get(
                         `${this.databaseUrl}/api/users/validate/${identifier}`,
-                        { timeout: 10000 }
+                        { 
+                            timeout: 15000,
+                            headers: { 'Content-Type': 'application/json' }
+                        }
                     );
                     if (response.data.valid) {
                         user = response.data.data;
                     }
                 } catch (error) {
-                    console.log('Error buscando por teléfono');
+                    console.log('Error buscando por teléfono:', error.message);
                 }
             }
 
@@ -956,15 +985,30 @@ class CommandProcessor {
                 throw new Error(`Usuario con identificador ${identifier} no encontrado`);
             }
 
+            // Preparar datos completos para la actualización (evitar campos null)
+            const completeUpdateData = {
+                nombre: agentData.nombre || user.nombre,
+                apellido: agentData.apellido || user.apellido || '',
+                telefono: agentData.telefono || user.telefono,
+                cargo_id: agentData.cargo_id !== undefined ? agentData.cargo_id : user.cargo_id,
+                estado: agentData.estado !== undefined ? agentData.estado : user.estado
+            };
+
+            console.log('📝 Datos completos para actualización:', completeUpdateData);
+
             // Actualizar los datos usando la API de BD
             const updateResponse = await axios.put(
                 `${this.databaseUrl}/api/users/${user.id}`,
-                agentData,
-                { timeout: 10000 }
+                completeUpdateData,
+                { 
+                    timeout: 15000,
+                    headers: { 'Content-Type': 'application/json' }
+                }
             );
 
-            if (!updateResponse.data.success) {
-                throw new Error('Error actualizando usuario en base de datos');
+            if (!updateResponse.data || !updateResponse.data.success) {
+                const errorMsg = updateResponse.data?.error || 'Error desconocido actualizando usuario';
+                throw new Error(`Error en API de BD: ${errorMsg}`);
             }
 
             const updatedAgent = updateResponse.data.data;
@@ -980,7 +1024,28 @@ class CommandProcessor {
 
         } catch (error) {
             console.error('❌ Error actualizando agente:', error.message);
-            throw new Error('Error actualizando agente: ' + error.message);
+            
+            // Mejor manejo de errores HTTP específicos
+            if (error.response) {
+                const status = error.response.status;
+                const errorData = error.response.data;
+                
+                if (status === 500) {
+                    throw new Error(`Error interno del servidor de BD: ${errorData?.error || 'Error desconocido'}`);
+                } else if (status === 404) {
+                    throw new Error(`Usuario no encontrado en la base de datos`);
+                } else if (status === 400) {
+                    throw new Error(`Datos inválidos: ${errorData?.error || 'Verificar los datos enviados'}`);
+                } else {
+                    throw new Error(`Error HTTP ${status}: ${errorData?.error || error.message}`);
+                }
+            } else if (error.code === 'ECONNREFUSED') {
+                throw new Error('No se puede conectar con la base de datos. Verificar conexión.');
+            } else if (error.code === 'ETIMEDOUT') {
+                throw new Error('Timeout conectando con la base de datos. Inténtalo nuevamente.');
+            } else {
+                throw new Error('Error actualizando agente: ' + error.message);
+            }
         }
     }
 
@@ -1052,7 +1117,10 @@ class CommandProcessor {
             if (!isNaN(identifier)) {
                 try {
                     // Buscar todos los usuarios y filtrar por ID
-                    const response = await axios.get(`${this.databaseUrl}/api/users`, { timeout: 10000 });
+                    const response = await axios.get(`${this.databaseUrl}/api/users`, { 
+                        timeout: 15000,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
                     if (response.data.success) {
                         user = response.data.data.find(u => u.id === parseInt(identifier));
                     }
@@ -1061,27 +1129,33 @@ class CommandProcessor {
                     if (!user) {
                         const phoneResponse = await axios.get(
                             `${this.databaseUrl}/api/users/validate/${identifier}`,
-                            { timeout: 10000 }
+                            { 
+                                timeout: 15000,
+                                headers: { 'Content-Type': 'application/json' }
+                            }
                         );
                         if (phoneResponse.data.valid) {
                             user = phoneResponse.data.data;
                         }
                     }
                 } catch (error) {
-                    console.log('Error buscando por ID, intentando por teléfono');
+                    console.log('Error buscando por ID, intentando por teléfono:', error.message);
                 }
             } else {
                 // Buscar por teléfono
                 try {
                     const response = await axios.get(
                         `${this.databaseUrl}/api/users/validate/${identifier}`,
-                        { timeout: 10000 }
+                        { 
+                            timeout: 15000,
+                            headers: { 'Content-Type': 'application/json' }
+                        }
                     );
                     if (response.data.valid) {
                         user = response.data.data;
                     }
                 } catch (error) {
-                    console.log('Error buscando por teléfono');
+                    console.log('Error buscando por teléfono:', error.message);
                 }
             }
 
@@ -1089,18 +1163,31 @@ class CommandProcessor {
                 throw new Error(`Usuario con identificador ${identifier} no encontrado`);
             }
 
-            // Actualizar solo el estado usando la API de BD
+            // Preparar datos completos para la actualización (evitar campos null)
             const newStatus = action === 'activate' ? 1 : 0;
-            const updateData = { estado: newStatus };
+            const completeUpdateData = {
+                nombre: user.nombre,
+                apellido: user.apellido || '',
+                telefono: user.telefono,
+                cargo_id: user.cargo_id,
+                estado: newStatus
+            };
+
+            console.log(`📝 Cambiando estado de ${user.nombre} a:`, newStatus === 1 ? 'ACTIVO' : 'INACTIVO');
+            console.log('📝 Datos completos para actualización:', completeUpdateData);
             
             const updateResponse = await axios.put(
                 `${this.databaseUrl}/api/users/${user.id}`,
-                updateData,
-                { timeout: 10000 }
+                completeUpdateData,
+                { 
+                    timeout: 15000,
+                    headers: { 'Content-Type': 'application/json' }
+                }
             );
 
-            if (!updateResponse.data.success) {
-                throw new Error('Error actualizando estado del usuario');
+            if (!updateResponse.data || !updateResponse.data.success) {
+                const errorMsg = updateResponse.data?.error || 'Error desconocido cambiando estado';
+                throw new Error(`Error en API de BD: ${errorMsg}`);
             }
 
             const updatedUser = updateResponse.data.data;
@@ -1118,7 +1205,28 @@ class CommandProcessor {
 
         } catch (error) {
             console.error('❌ Error cambiando estado de agente:', error.message);
-            throw new Error('Error cambiando estado: ' + error.message);
+            
+            // Mejor manejo de errores HTTP específicos
+            if (error.response) {
+                const status = error.response.status;
+                const errorData = error.response.data;
+                
+                if (status === 500) {
+                    throw new Error(`Error interno del servidor de BD: ${errorData?.error || 'Error desconocido'}`);
+                } else if (status === 404) {
+                    throw new Error(`Usuario no encontrado en la base de datos`);
+                } else if (status === 400) {
+                    throw new Error(`Datos inválidos: ${errorData?.error || 'Verificar el identificador del usuario'}`);
+                } else {
+                    throw new Error(`Error HTTP ${status}: ${errorData?.error || error.message}`);
+                }
+            } else if (error.code === 'ECONNREFUSED') {
+                throw new Error('No se puede conectar con la base de datos. Verificar conexión.');
+            } else if (error.code === 'ETIMEDOUT') {
+                throw new Error('Timeout conectando con la base de datos. Inténtalo nuevamente.');
+            } else {
+                throw new Error('Error cambiando estado: ' + error.message);
+            }
         }
     }
 

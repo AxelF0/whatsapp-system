@@ -1,10 +1,17 @@
-// servidor/modulo-procesamiento/src/services/menuManager.js
+// servidor/modulo-backend/src/services/menuManager.js
+
+const axios = require('axios');
 
 class MenuManager {
     constructor() {
         // Estado de sesiones de menú por usuario
         this.userSessions = new Map();
         this.sessionTimeout = 30 * 60 * 1000; // 30 minutos
+        
+        // Configuración de conexión con Database Module
+        this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
+        this.responsesUrl = process.env.RESPONSES_URL || 'http://localhost:3005';
+        this.timeout = 10000; // 10 segundos
         
         // Definición de menús
         this.menus = this.defineMenus();
@@ -98,6 +105,33 @@ class MenuManager {
         }
         
         return session;
+    }
+
+    // Procesar mensaje desde el Backend API (NUEVA ARQUITECTURA)
+    async processMessage({messageData, user}) {
+        console.log('📱 MenuManager procesando mensaje:', {
+            user: user.name,
+            userId: user.id,
+            userDataId: user.userData?.id,
+            message: messageData.body
+        });
+        
+        // Verificar que user.userData contenga el ID correcto
+        if (!user.userData?.id) {
+            console.error('❌ CRÍTICO: user.userData no tiene ID:', {
+                user: user,
+                userData: user.userData
+            });
+        } else {
+            console.log(`✅ Usuario ID confirmado: ${user.userData.id} (${user.name})`);
+        }
+        
+        return await this.processInput(
+            user.phone, 
+            user.role, 
+            messageData.body, 
+            user.userData
+        );
     }
 
     // Procesar entrada del usuario
@@ -264,13 +298,27 @@ class MenuManager {
 
             case 'MY_PROPERTIES':
                 session.currentAction = null;
+                
+                // Verificar que tengamos el ID del usuario
+                const userId = session.actionData.userData?.id;
+                if (!userId) {
+                    console.error('❌ No se encontró ID de usuario en session.actionData.userData:', session.actionData);
+                    return {
+                        success: false,
+                        message: '❌ Error: No se pudo identificar tu usuario. Intenta salir y volver a entrar al sistema.',
+                        showMenu: true
+                    };
+                }
+                
+                console.log(`📋 Listando propiedades del usuario ID: ${userId}`);
+                
                 return {
                     success: true,
                     message: '📋 Obteniendo tus propiedades...',
                     executeCommand: {
                         type: 'list_properties',
                         parameters: {
-                            filters: { usuario_id: session.actionData.userData.id }
+                            filters: { usuario_id: userId }
                         }
                     }
                 };

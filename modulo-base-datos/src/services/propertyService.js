@@ -426,6 +426,12 @@ class PropertyService {
                 return await this.model.findByType(filters.tipo_propiedad);
             }
 
+            // Si solo hay usuario_id, usar búsqueda específica (MIS PROPIEDADES)
+            if (filters.usuario_id && Object.keys(filters).length === 1) {
+                console.log(`🏠 BÚSQUEDA ESPECÍFICA: Propiedades del usuario ${filters.usuario_id}`);
+                return await this.model.findByUserId(filters.usuario_id);
+            }
+
             // Para filtros múltiples, usar búsqueda personalizada
             return await this.model.findByMultipleFilters(filters);
 
@@ -448,6 +454,10 @@ class PropertyService {
 
     async createProperty(propertyData) {
         return await this.create(propertyData);
+    }
+
+    async updateProperty(propertyId, updateData) {
+        return await this.update(propertyId, updateData);
     }
 
     async deleteProperty(propertyId) {

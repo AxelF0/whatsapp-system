@@ -82,6 +82,25 @@ app.get('/api/users/validate/:phone', async (req, res) => {
     }
 });
 
+// Obtener usuario por ID
+app.get('/api/users/:id', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        if (isNaN(userId)) {
+            return res.status(400).json({ success: false, error: 'ID de usuario inválido' });
+        }
+        
+        const user = await userService.getUserById(userId);
+        if (user) {
+            res.json({ success: true, data: user });
+        } else {
+            res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Actualizar usuario por ID
 app.put('/api/users/:id', async (req, res) => {
     try {
@@ -204,6 +223,22 @@ app.post('/api/properties', async (req, res) => {
         res.status(201).json({ success: true, data: property });
     } catch (error) {
         res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+// Actualizar propiedad
+app.put('/api/properties/:id', async (req, res) => {
+    try {
+        const propertyId = parseInt(req.params.id);
+        if (isNaN(propertyId)) {
+            return res.status(400).json({ success: false, error: 'ID de propiedad inválido' });
+        }
+        
+        const updatedProperty = await propertyService.updateProperty(propertyId, req.body);
+        res.json({ success: true, data: updatedProperty });
+    } catch (error) {
+        const status = error.message.includes('no encontrada') ? 404 : 500;
+        res.status(status).json({ success: false, error: error.message });
     }
 });
 

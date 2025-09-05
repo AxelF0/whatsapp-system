@@ -29,6 +29,13 @@ class UserService {
         return await this.userModel.findAll();
     }
 
+    async getUserById(id) {
+        if (!id) {
+            throw new Error('ID de usuario requerido');
+        }
+        return await this.userModel.findById(id);
+    }
+
     async updateUser(id, userData) {
         if (!id) {
             throw new Error('ID de usuario requerido');

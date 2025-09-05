@@ -6,8 +6,6 @@ class UserValidator {
     constructor() {
         this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
         this.timeout = 10000; // 10 segundos
-        this.cache = new Map(); // Cache simple para usuarios validados
-        this.cacheTimeout = 5 * 60 * 1000; // 5 minutos
     }
 
     async validateUser(phoneNumber) {
@@ -39,9 +37,6 @@ class UserValidator {
                         sessionId: sessionData.session?._id
                     };
 
-                    // También guardar en cache local como backup
-                    this.cache.set(cleanPhone, validationResult);
-
                     if (sessionData.fromCache) {
                         console.log('✅ Usuario válido desde sesión (Database Module):', sessionData.user.nombre);
                     } else {
@@ -55,22 +50,7 @@ class UserValidator {
                 // Continuar con el fallback si el Database Module falla
             }
 
-            // 3. FALLBACK: Cache local (solo si MongoDB no está disponible)
-            const cacheKey = cleanPhone;
-            if (this.cache.has(cacheKey)) {
-                const cached = this.cache.get(cacheKey);
-                
-                // Verificar si el cache no ha expirado
-                if (Date.now() - cached.timestamp < this.cacheTimeout) {
-                    console.log('✅ Usuario encontrado en cache local (fallback):', cached.userData?.nombre);
-                    return cached;
-                }
-                
-                // Cache expirado, eliminar
-                this.cache.delete(cacheKey);
-            }
-
-            // 4. FALLBACK: Consulta directa a PostgreSQL (último recurso)
+            // 3. FALLBACK: Consulta directa a PostgreSQL (último recurso)
             const response = await axios.get(`${this.databaseUrl}/api/users/validate/${cleanPhone}`, {
                 timeout: this.timeout,
                 headers: {
@@ -85,9 +65,6 @@ class UserValidator {
                 fromSession: false,
                 method: 'fallback-direct'
             };
-
-            // Guardar en cache local
-            this.cache.set(cacheKey, validationResult);
 
             if (validationResult.isValid) {
                 console.log('✅ Usuario válido (método directo):', validationResult.userData.nombre);
@@ -197,27 +174,7 @@ class UserValidator {
         return userDetails;
     }
 
-    // Invalidar cache de un usuario específico
-    invalidateUserCache(phoneNumber) {
-        const cleanPhone = this.cleanPhoneNumber(phoneNumber);
-        this.cache.delete(cleanPhone);
-        console.log(`🗑️ Cache invalidado para usuario: ${cleanPhone}`);
-    }
-
-    // Limpiar todo el cache
-    clearCache() {
-        this.cache.clear();
-        console.log('🗑️ Cache de usuarios limpiado completamente');
-    }
-
-    // Obtener estadísticas del cache
-    getCacheStats() {
-        return {
-            totalCachedUsers: this.cache.size,
-            cacheTimeout: this.cacheTimeout,
-            users: Array.from(this.cache.keys())
-        };
-    }
+    // Cache methods removed - now using MongoDB sessions only
 
     // Verificar conectividad con base de datos
     async testDatabaseConnection() {

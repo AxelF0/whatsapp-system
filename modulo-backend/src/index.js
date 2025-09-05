@@ -3,12 +3,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 
 // Servicios
 const PropertyService = require('./services/propertyService');
 const ClientService = require('./services/clientService');
 const UserService = require('./services/userService');
 const CommandProcessor = require('./services/commandProcessor');
+const MenuManager = require('./services/menuManager');
 
 // Controladores
 const PropertyController = require('./controllers/propertyController');
@@ -34,6 +36,7 @@ const propertyService = new PropertyService();
 const clientService = new ClientService();
 const userService = new UserService();
 const commandProcessor = new CommandProcessor(propertyService, clientService, userService);
+const menuManager = new MenuManager();
 
 // Inicializar controladores
 const propertyController = new PropertyController(propertyService);
@@ -45,12 +48,93 @@ app.locals.services = {
     propertyService,
     clientService,
     userService,
-    commandProcessor
+    commandProcessor,
+    menuManager
 };
 
-// ==================== RUTA PRINCIPAL DE COMANDOS ====================
+// ==================== RUTAS PRINCIPALES ====================
 
-// Procesar comando de WhatsApp
+// Procesar requests del módulo de procesamiento (NUEVA ARQUITECTURA)
+app.post('/api/system/process', async (req, res) => {
+    try {
+        console.log('🔄 Procesando mensaje del sistema:', {
+            user: req.body.user?.name,
+            message: req.body.messageData?.body?.substring(0, 50) + '...'
+        });
+
+        const result = await menuManager.processMessage({
+            messageData: req.body.messageData,
+            user: req.body.user
+        });
+
+        // Si el resultado incluye un comando a ejecutar, procesarlo
+        if (result.executeCommand) {
+            console.log('⚙️ Ejecutando comando:', result.executeCommand.type);
+            
+            try {
+                const commandResult = await commandProcessor.processCommand({
+                    command: result.executeCommand,
+                    user: req.body.user
+                });
+                
+                // Combinar resultado del menú con resultado del comando
+                result.commandResult = commandResult;
+                result.message += `\n\n${commandResult.message || 'Comando ejecutado correctamente'}`;
+                
+            } catch (commandError) {
+                console.error('❌ Error ejecutando comando:', commandError.message);
+                result.message += `\n\n❌ Error: ${commandError.message}`;
+            }
+        }
+
+        // ENVIAR DIRECTAMENTE AL MÓDULO DE RESPUESTAS
+        const responsesUrl = process.env.RESPONSES_URL || 'http://localhost:3005';
+        
+        try {
+            console.log('📤 Enviando respuesta al módulo de respuestas');
+            
+            await axios.post(`${responsesUrl}/api/send/system`, {
+                to: req.body.user.phone,
+                message: result.message,
+                type: 'text',
+                metadata: {
+                    messageId: req.body.messageData?.messageId,
+                    userId: req.body.user.id,
+                    userRole: req.body.user.role,
+                    showMenu: result.showMenu,
+                    executeCommand: result.executeCommand,
+                    waitingFor: result.waitingFor
+                }
+            });
+
+            // Responder al Procesamiento que todo fue exitoso
+            res.json({
+                success: true,
+                message: 'Mensaje procesado y enviado al usuario',
+                processed: true
+            });
+
+        } catch (responsesError) {
+            console.error('❌ Error enviando a módulo de respuestas:', responsesError.message);
+            
+            // Si falla el envío, devolver error al Procesamiento
+            res.status(500).json({
+                success: false,
+                error: 'Error enviando respuesta al usuario',
+                details: responsesError.message
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ Error procesando mensaje del sistema:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Procesar comando de WhatsApp (LEGACY)
 app.post('/api/command', async (req, res) => {
     try {
         console.log('📥 Procesando comando:', {
@@ -320,6 +404,7 @@ async function startBackendModule() {
             console.log(`✅ Módulo Backend ejecutándose en puerto ${PORT}`);
             console.log(`🌐 Endpoints principales:`);
             console.log(`   - http://localhost:${PORT}/api/health`);
+            console.log(`   - POST http://localhost:${PORT}/api/system/process (NUEVA ARQUITECTURA)`);
             console.log(`   - POST http://localhost:${PORT}/api/command`);
             console.log(`   - GET  http://localhost:${PORT}/api/properties`);
             console.log(`   - GET  http://localhost:${PORT}/api/clients`);

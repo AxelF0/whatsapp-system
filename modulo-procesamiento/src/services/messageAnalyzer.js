@@ -48,13 +48,17 @@ class MessageAnalyzer {
                     analysis.requiresBackend = true;
                     analysis.requiresIA = false;
                 } else {
-                    console.log('❌ No es usuario del sistema, tratando como cliente');
-                    analysis.type = 'client_query';
-                    analysis.description = 'Cliente consultando';
-                    analysis.clientPhone = messageData.from;
-                    analysis.agentPhone = messageData.to;
-                    analysis.requiresIA = true;
-                    analysis.requiresBackend = false;
+                    // TODO: Temporalmente deshabilitado el flujo cliente-agente
+                    // console.log('❌ No es usuario del sistema, tratando como cliente');
+                    // analysis.type = 'client_query';
+                    // analysis.description = 'Cliente consultando';
+                    // analysis.clientPhone = messageData.from;
+                    // analysis.agentPhone = messageData.to;
+                    // analysis.requiresIA = true;
+                    // analysis.requiresBackend = false;
+                    
+                    // Por ahora, rechazar mensajes de no-usuarios
+                    throw new Error('Número no autorizado para usar el sistema');
                 }
 
                 return analysis;
@@ -69,6 +73,8 @@ class MessageAnalyzer {
         }
     }
 
+    // TODO: Temporalmente deshabilitado el análisis de consultas de clientes
+    /*
     // Analizar consulta de cliente (para IA)
     analyzeClientQuery(messageBody) {
         const analysis = {
@@ -92,6 +98,7 @@ class MessageAnalyzer {
 
         return analysis;
     }
+    */
 
     // Analizar comando de sistema (para Backend)
     analyzeSystemCommand(messageBody) {

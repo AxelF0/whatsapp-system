@@ -6,7 +6,6 @@ const cors = require('cors');
 
 const MessageAnalyzer = require('./services/messageAnalyzer');
 const UserValidator = require('./services/userValidator');
-const ClientRouter = require('./services/clientRouter');
 const SystemRouter = require('./services/systemRouter');
 
 const app = express();
@@ -26,14 +25,12 @@ app.use((req, res, next) => {
 // Inicializar servicios
 const userValidator = new UserValidator();
 const messageAnalyzer = new MessageAnalyzer(userValidator);
-const clientRouter = new ClientRouter();
 const systemRouter = new SystemRouter();
 
 // Hacer servicios disponibles
 app.locals.services = {
     messageAnalyzer,
     userValidator,
-    clientRouter,
     systemRouter
 };
 
@@ -57,8 +54,12 @@ app.post('/api/process/message', async (req, res) => {
 
         // 2. Rutear según el tipo de mensaje
         if (analysis.type === 'client_query') {
-            // Es una consulta de cliente → Ir a IA
-            result = await clientRouter.routeToIA(req.body, analysis);
+            // Es una consulta de cliente → Ir directamente al módulo IA (no implementado aquí)
+            result = {
+                action: 'redirect_to_ia',
+                reason: 'Consulta de cliente - debe ser manejada por módulo IA',
+                processed: false
+            };
         } else if (analysis.type === 'system_command') {
             // Es un comando de agente/gerente → Ir a Backend
             result = await systemRouter.routeToBackend(req.body, analysis);
@@ -89,16 +90,14 @@ app.post('/api/process/message', async (req, res) => {
     }
 });
 
-// Procesar respuesta de IA (cuando la IA responda)
+// Procesar respuesta de IA (cuando la IA responda) - PENDIENTE DE IMPLEMENTAR
 app.post('/api/process/ai-response', async (req, res) => {
     try {
-        console.log('🤖 Procesando respuesta de IA');
-
-        const result = await clientRouter.processAIResponse(req.body);
+        console.log('🤖 Procesando respuesta de IA - PENDIENTE DE IMPLEMENTAR');
 
         res.json({
-            success: true,
-            data: result
+            success: false,
+            message: 'Endpoint pendiente de implementar - el módulo IA debe manejar esto directamente'
         });
 
     } catch (error) {

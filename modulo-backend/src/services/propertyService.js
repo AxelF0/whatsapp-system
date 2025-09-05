@@ -106,29 +106,6 @@ class PropertyService {
         }
     }
 
-    // Buscar propiedades con filtros
-    async search(filters = {}) {
-        console.log('🔍 Buscando propiedades con filtros:', filters);
-
-        try {
-            const response = await axios.post(
-                `${this.databaseUrl}/api/properties/search`,
-                filters,
-                { timeout: 10000 }
-            );
-
-            if (response.data.success) {
-                console.log(`✅ ${response.data.data.length} propiedades encontradas`);
-                return response.data.data;
-            } else {
-                throw new Error(response.data.error || 'Error en búsqueda');
-            }
-
-        } catch (error) {
-            console.error('❌ Error buscando propiedades:', error.message);
-            throw error;
-        }
-    }
 
     // Eliminar propiedad (soft delete)
     async delete(propertyId) {
@@ -236,7 +213,11 @@ class PropertyService {
 
     // Listar todas las propiedades
     async list(filters = {}) {
-        console.log('📋 Listando propiedades');
+        console.log('📋 Listando propiedades con filtros:', filters);
+        
+        if (filters.usuario_id) {
+            console.log(`🔍 FILTRO ACTIVO: Buscando propiedades del usuario ID: ${filters.usuario_id}`);
+        }
 
         try {
             const response = await axios.get(
@@ -302,6 +283,39 @@ class PropertyService {
             console.error('❌ Error buscando todas las propiedades:', error.message);
             return [];
         }
+    }
+
+    // Buscar propiedades por tipo
+    async searchByType(type) {
+        console.log('🔍 Buscando propiedades por tipo:', type);
+        return await this.search({ tipo_propiedad: type });
+    }
+
+    // Buscar propiedades por precio
+    async searchByPrice(minPrice, maxPrice) {
+        console.log('🔍 Buscando propiedades por precio:', { minPrice, maxPrice });
+        const filters = {};
+        if (minPrice) filters.precio_min = minPrice;
+        if (maxPrice) filters.precio_max = maxPrice;
+        return await this.search(filters);
+    }
+
+    // Buscar propiedades por ubicación
+    async searchByLocation(location) {
+        console.log('🔍 Buscando propiedades por ubicación:', location);
+        return await this.search({ ubicacion: location });
+    }
+
+    // Buscar propiedades personalizada
+    async searchCustom(criteria) {
+        console.log('🔍 Búsqueda personalizada:', criteria);
+        return await this.search(criteria);
+    }
+
+    // Buscar propiedades por precio máximo
+    async searchByMaxPrice(maxPrice) {
+        console.log('🔍 Buscando propiedades por precio máximo:', maxPrice);
+        return await this.search({ precio_max: maxPrice });
     }
 
     // Obtener propiedades de un agente
