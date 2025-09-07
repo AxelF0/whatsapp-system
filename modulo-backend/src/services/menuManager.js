@@ -17,6 +17,7 @@ class MenuManager {
         this.menus = this.defineMenus();
     }
 
+    // Definir estructura de menús
     defineMenus() {
         return {
             MAIN: {
@@ -35,7 +36,9 @@ class MenuManager {
                 options: [
                     { id: '1', label: 'Agregar Cliente', action: 'ADD_CLIENT' },
                     { id: '2', label: 'Modificar Cliente', action: 'MODIFY_CLIENT' },
-                    { id: '3', label: 'Ver Todos los Clientes', action: 'LIST_CLIENTS' },
+                    { id: '3', label: 'Eliminar Cliente', action: 'DELETE_CLIENT', requiredRole: ['gerente'] },
+                    { id: '4', label: 'Reactivar Cliente', action: 'REACTIVATE_CLIENT', requiredRole: ['gerente'] },
+                    { id: '5', label: 'Ver Todos los Clientes', action: 'LIST_CLIENTS' },
                     { id: '0', label: 'Volver al Menú Principal', next: 'MAIN' }
                 ]
             },
@@ -45,9 +48,12 @@ class MenuManager {
                 options: [
                     { id: '1', label: 'Agregar Propiedad', action: 'ADD_PROPERTY' },
                     { id: '2', label: 'Modificar Propiedad', action: 'MODIFY_PROPERTY' },
-                    { id: '3', label: 'Agregar Archivo a Propiedad', action: 'ADD_FILE' },
-                    { id: '4', label: 'Buscar Propiedades', action: 'SEARCH_PROPERTIES' },
-                    { id: '5', label: 'Mis Propiedades', action: 'MY_PROPERTIES' },
+                    { id: '3', label: 'Eliminar Propiedad', action: 'DELETE_PROPERTY' },
+                    { id: '4', label: 'Reactivar Propiedad', action: 'REACTIVATE_PROPERTY' },
+                    { id: '5', label: 'Agregar Archivo a Propiedad', action: 'ADD_FILE' },
+                    { id: '6', label: 'Buscar Propiedades', action: 'SEARCH_PROPERTIES' },
+                    { id: '7', label: 'Filtros Avanzados', action: 'ADVANCED_FILTERS' },
+                    { id: '8', label: 'Mis Propiedades', action: 'MY_PROPERTIES' },
                     { id: '0', label: 'Volver al Menú Principal', next: 'MAIN' }
                 ]
             },
@@ -379,8 +385,43 @@ class MenuManager {
             case 'TOGGLE_AGENT':
                 return {
                     success: true,
-                    message: '🔄 *DAR DE BAJA/ALTA AGENTE*\n\n¿Conoces el ID o teléfono del agente?\n\n1. Sí, conozco el dato\n2. No, mostrar lista de agentes',
+                    message: '🔄 *DAR DE BAJA/ALTA AGENTE*\n\n¿Conoces el ID o teléfono del agente?\n\n1. Sí, conozco el dato\n2. No, mostrar agentes ACTIVOS\n3. No, mostrar agentes INACTIVOS',
                     waitingFor: 'toggle_agent_choice'
+                };
+
+            case 'DELETE_CLIENT':
+                return {
+                    success: true,
+                    message: '🗑️ *ELIMINAR CLIENTE*\n\n¿Conoces el ID o teléfono del cliente?\n\n1. Sí, conozco el dato\n2. No, mostrar lista de clientes',
+                    waitingFor: 'delete_client_choice'
+                };
+
+            case 'REACTIVATE_CLIENT':
+                return {
+                    success: true,
+                    message: '✅ *REACTIVAR CLIENTE*\n\n¿Conoces el ID o teléfono del cliente?\n\n1. Sí, conozco el dato\n2. No, mostrar clientes eliminados',
+                    waitingFor: 'reactivate_client_choice'
+                };
+
+            case 'DELETE_PROPERTY':
+                return {
+                    success: true,
+                    message: '🗑️ *ELIMINAR PROPIEDAD*\n\n¿Conoces el ID de la propiedad?\n\n1. Sí, conozco el ID\n2. No, mostrar mis propiedades activas',
+                    waitingFor: 'delete_property_choice'
+                };
+
+            case 'REACTIVATE_PROPERTY':
+                return {
+                    success: true,
+                    message: '✅ *REACTIVAR PROPIEDAD*\n\n¿Conoces el ID de la propiedad?\n\n1. Sí, conozco el ID\n2. No, mostrar mis propiedades eliminadas',
+                    waitingFor: 'reactivate_property_choice'
+                };
+
+            case 'ADVANCED_FILTERS':
+                return {
+                    success: true,
+                    message: '🔍 *FILTROS AVANZADOS*\n\n¿Qué filtro quieres usar?\n\n1. Por tipo de operación (Venta/Alquiler)\n2. Por tipo de propiedad (Casa/Depto/etc)\n3. Por estado (Disponible/Vendida/etc)\n4. Búsqueda personalizada\n\nSelecciona una opción:',
+                    waitingFor: 'advanced_filter_choice'
                 };
 
             default:
@@ -436,6 +477,21 @@ class MenuManager {
             
             case 'TOGGLE_AGENT':
                 return this.processToggleAgent(session, input);
+            
+            case 'DELETE_CLIENT':
+                return this.processDeleteClient(session, input);
+            
+            case 'REACTIVATE_CLIENT':
+                return this.processReactivateClient(session, input);
+            
+            case 'DELETE_PROPERTY':
+                return this.processDeleteProperty(session, input, userData);
+            
+            case 'REACTIVATE_PROPERTY':
+                return this.processReactivateProperty(session, input, userData);
+            
+            case 'ADVANCED_FILTERS':
+                return this.processAdvancedFilters(session, input, userData);
             
             case 'LIST_AGENTS':
                 // LIST_AGENTS no necesita procesamiento, es inmediato
@@ -707,70 +763,179 @@ class MenuManager {
                 session.actionStep = 3;
                 return {
                     success: true,
-                    message: '💰 Ingresa el *precio* en Bolivianos (solo números):',
-                    waitingFor: 'property_price'
+                    message: '🎯 *TIPO DE OPERACIÓN*\n\n¿Para qué será la propiedad?\n\n1. Venta\n2. Alquiler\n3. Venta o Alquiler\n\nSelecciona:',
+                    waitingFor: 'operation_type'
                 };
             
-            case 3: // Precio
-                const price = parseInt(input.replace(/\D/g, ''));
-                if (isNaN(price) || price <= 0) {
+            case 3: // Tipo de operación
+                const operationTypes = { '1': 'venta', '2': 'alquiler', '3': 'venta o alquiler' };
+                const operationTypeIds = { '1': 1, '2': 2, '3': 3 };
+                session.actionData.tipo_operacion = operationTypes[input];
+                session.actionData.tipo_operacion_id = operationTypeIds[input];
+                
+                if (!session.actionData.tipo_operacion) {
                     return {
                         success: false,
-                        message: '❌ Precio inválido. Ingresa solo números:',
-                        waitingFor: 'property_price'
+                        message: '❌ Opción no válida. Selecciona 1, 2 o 3:',
+                        waitingFor: 'operation_type'
                     };
                 }
-                session.actionData.precio = price;
+                
                 session.actionStep = 4;
+                
+                // Determinar qué precios solicitar
+                if (session.actionData.tipo_operacion === 'venta') {
+                    return {
+                        success: true,
+                        message: '💰 Ingresa el *precio de venta* en Bolivianos (solo números):',
+                        waitingFor: 'sale_price'
+                    };
+                } else if (session.actionData.tipo_operacion === 'alquiler') {
+                    return {
+                        success: true,
+                        message: '🏠 Ingresa el *precio de alquiler mensual* en Bolivianos (solo números):',
+                        waitingFor: 'rental_price'
+                    };
+                } else { // venta o alquiler
+                    return {
+                        success: true,
+                        message: '💰 Ingresa el *precio de venta* en Bolivianos (solo números):',
+                        waitingFor: 'sale_price'
+                    };
+                }
+            
+            case 4: // Primer precio
+                if (session.actionData.tipo_operacion === 'venta') {
+                    // Solo precio de venta
+                    const salePrice = parseInt(input.replace(/\D/g, ''));
+                    if (isNaN(salePrice) || salePrice <= 0) {
+                        return {
+                            success: false,
+                            message: '❌ Precio inválido. Ingresa solo números:',
+                            waitingFor: 'sale_price'
+                        };
+                    }
+                    session.actionData.precio_venta = salePrice;
+                    session.actionStep = 6; // Saltar al tipo de propiedad
+                } else if (session.actionData.tipo_operacion === 'alquiler') {
+                    // Solo precio de alquiler
+                    const rentalPrice = parseInt(input.replace(/\D/g, ''));
+                    if (isNaN(rentalPrice) || rentalPrice <= 0) {
+                        return {
+                            success: false,
+                            message: '❌ Precio inválido. Ingresa solo números:',
+                            waitingFor: 'rental_price'
+                        };
+                    }
+                    session.actionData.precio_alquiler = rentalPrice;
+                    session.actionStep = 6; // Saltar al tipo de propiedad
+                } else {
+                    // Venta o alquiler - primer precio (venta)
+                    const salePrice = parseInt(input.replace(/\D/g, ''));
+                    if (isNaN(salePrice) || salePrice <= 0) {
+                        return {
+                            success: false,
+                            message: '❌ Precio inválido. Ingresa solo números:',
+                            waitingFor: 'sale_price'
+                        };
+                    }
+                    session.actionData.precio_venta = salePrice;
+                    session.actionStep = 5; // Continuar al precio de alquiler
+                    return {
+                        success: true,
+                        message: '🏠 Ahora ingresa el *precio de alquiler mensual* en Bolivianos (solo números):',
+                        waitingFor: 'rental_price'
+                    };
+                }
+                
+                // Continuar al tipo de propiedad
                 return {
                     success: true,
-                    message: '🏠 Tipo de propiedad:\n1. Casa\n2. Departamento\n3. Terreno\n4. Oficina\n5. Local\n\nSelecciona:',
+                    message: '🏠 *TIPO DE PROPIEDAD*\n\n1. Casa\n2. Departamento\n3. Terreno\n4. Oficina\n5. Local Comercial\n\nSelecciona:',
                     waitingFor: 'property_type'
                 };
             
-            case 4: // Tipo
-                const types = { '1': 'casa', '2': 'departamento', '3': 'terreno', '4': 'oficina', '5': 'local' };
-                session.actionData.tipo_propiedad = types[input] || 'casa';
-                session.actionStep = 5;
+            case 5: // Segundo precio (solo para venta o alquiler)
+                const rentalPrice = parseInt(input.replace(/\D/g, ''));
+                if (isNaN(rentalPrice) || rentalPrice <= 0) {
+                    return {
+                        success: false,
+                        message: '❌ Precio inválido. Ingresa solo números:',
+                        waitingFor: 'rental_price'
+                    };
+                }
+                session.actionData.precio_alquiler = rentalPrice;
+                session.actionStep = 6;
                 return {
                     success: true,
-                    message: '📏 Ingresa la *superficie* (ej: "200 m²" o solo "200"):',
+                    message: '🏠 *TIPO DE PROPIEDAD*\n\n1. Casa\n2. Departamento\n3. Terreno\n4. Oficina\n5. Local Comercial\n\nSelecciona:',
+                    waitingFor: 'property_type'
+                };
+            
+            case 6: // Tipo de propiedad
+                const propertyTypes = { '1': 1, '2': 2, '3': 3, '4': 5, '5': 4 }; // IDs de la DB
+                const propertyTypeNames = { '1': 'Casa', '2': 'Departamento', '3': 'Terreno', '4': 'Oficina', '5': 'Local Comercial' };
+                session.actionData.tipo_propiedad_id = propertyTypes[input];
+                session.actionData.tipo_propiedad_nombre = propertyTypeNames[input];
+                
+                if (!session.actionData.tipo_propiedad_id) {
+                    return {
+                        success: false,
+                        message: '❌ Opción no válida. Selecciona del 1 al 5:',
+                        waitingFor: 'property_type'
+                    };
+                }
+                
+                session.actionStep = 7;
+                return {
+                    success: true,
+                    message: '📏 Ingresa la *superficie* (ej: "200 m²" o solo "200", opcional):',
                     waitingFor: 'property_surface'
                 };
             
-            case 5: // Superficie
-                session.actionData.superficie = input;
-                session.actionStep = 6;
+            case 7: // Superficie
+                session.actionData.superficie = input.trim() || null;
+                session.actionStep = 8;
                 return {
                     success: true,
                     message: '📐 Ingresa las *dimensiones* (ej: "10x15 metros", opcional):',
                     waitingFor: 'property_dimensions'
                 };
             
-            case 6: // Dimensiones
+            case 8: // Dimensiones
                 session.actionData.dimensiones = input.trim() || null;
-                session.actionStep = 7;
+                session.actionStep = 9;
                 return {
                     success: true,
-                    message: '📝 Agrega una *descripción* de la propiedad:',
+                    message: '📝 Agrega una *descripción* de la propiedad (opcional):',
                     waitingFor: 'property_description'
                 };
             
-            case 7: // Descripción
-                session.actionData.descripcion = input;
+            case 9: // Descripción
+                session.actionData.descripcion = input.trim() || null;
                 session.currentAction = null;
+                
+                // Preparar datos para la base de datos
+                const propertyData = {
+                    usuario_id: userData.id,
+                    nombre_propiedad: session.actionData.nombre_propiedad,
+                    ubicacion: session.actionData.ubicacion,
+                    tipo_operacion_id: session.actionData.tipo_operacion_id,
+                    tipo_propiedad_id: session.actionData.tipo_propiedad_id,
+                    precio_venta: session.actionData.precio_venta || null,
+                    precio_alquiler: session.actionData.precio_alquiler || null,
+                    superficie: session.actionData.superficie,
+                    dimensiones: session.actionData.dimensiones,
+                    descripcion: session.actionData.descripcion,
+                    estado_propiedad_id: 1 // Disponible por defecto
+                };
                 
                 return {
                     success: true,
                     message: '✅ Registrando propiedad...',
                     executeCommand: {
                         type: 'create_property',
-                        parameters: {
-                            propertyData: {
-                                ...session.actionData,
-                                usuario_id: userData.id
-                            }
-                        }
+                        parameters: { propertyData }
                     }
                 };
         }
@@ -965,11 +1130,14 @@ class MenuManager {
                 const fields = {
                     '1': 'nombre_propiedad',
                     '2': 'ubicacion', 
-                    '3': 'precio',
-                    '4': 'descripcion',
-                    '5': 'tipo_propiedad',
-                    '6': 'superficie',
-                    '7': 'dimensiones'
+                    '3': 'tipo_operacion',
+                    '4': 'precio_venta',
+                    '5': 'precio_alquiler',
+                    '6': 'tipo_propiedad',
+                    '7': 'estado_propiedad',
+                    '8': 'superficie',
+                    '9': 'dimensiones',
+                    '10': 'descripcion'
                 };
                 
                 session.actionData.fieldToModify = fields[input];
@@ -977,20 +1145,42 @@ class MenuManager {
                 if (!session.actionData.fieldToModify) {
                     return {
                         success: false,
-                        message: '❌ Opción no válida. Selecciona del 1 al 7:',
+                        message: '❌ Opción no válida. Selecciona del 1 al 10:',
                         waitingFor: 'modify_field'
                     };
                 }
                 
                 session.actionStep = 4;
+                
+                // Manejar campos especiales con opciones
+                if (session.actionData.fieldToModify === 'tipo_operacion') {
+                    return {
+                        success: true,
+                        message: '🎯 Selecciona el nuevo tipo de operación:\n\n1. Venta\n2. Alquiler\n3. Venta o Alquiler\n\nSelecciona:',
+                        waitingFor: 'operation_type_option'
+                    };
+                } else if (session.actionData.fieldToModify === 'tipo_propiedad') {
+                    return {
+                        success: true,
+                        message: '🏠 Selecciona el nuevo tipo de propiedad:\n\n1. Casa\n2. Departamento\n3. Terreno\n4. Oficina\n5. Local Comercial\n\nSelecciona:',
+                        waitingFor: 'property_type_option'
+                    };
+                } else if (session.actionData.fieldToModify === 'estado_propiedad') {
+                    return {
+                        success: true,
+                        message: '📊 Selecciona el nuevo estado:\n\n1. Disponible\n2. Reservada\n3. Vendida\n4. Alquilada\n\nSelecciona:',
+                        waitingFor: 'property_status_option'
+                    };
+                }
+                
                 let fieldName = {
                     'nombre_propiedad': 'nombre',
                     'ubicacion': 'ubicación',
-                    'precio': 'precio',
-                    'descripcion': 'descripción',
-                    'tipo_propiedad': 'tipo de propiedad',
+                    'precio_venta': 'precio de venta (en Bs)',
+                    'precio_alquiler': 'precio de alquiler mensual (en Bs)',
                     'superficie': 'superficie',
-                    'dimensiones': 'dimensiones'
+                    'dimensiones': 'dimensiones',
+                    'descripcion': 'descripción'
                 }[session.actionData.fieldToModify];
                 
                 return {
@@ -999,13 +1189,48 @@ class MenuManager {
                     waitingFor: 'new_value'
                 };
             
-            case 4: // Nuevo valor
-                session.actionData.newValue = input;
-                session.currentAction = null;
-                
-                // Validación específica según el campo
+            case 4: // Nuevo valor o selección de opción
                 let validatedValue = input;
-                if (session.actionData.fieldToModify === 'precio') {
+                let targetFieldName = session.actionData.fieldToModify;
+                
+                // Manejar opciones especiales
+                if (input.includes('operation_type_option') || session.actionData.fieldToModify === 'tipo_operacion') {
+                    const operationTypes = { '1': 1, '2': 2, '3': 3 }; // IDs de DB
+                    validatedValue = operationTypes[input];
+                    targetFieldName = 'tipo_operacion_id';
+                    
+                    if (!validatedValue) {
+                        return {
+                            success: false,
+                            message: '❌ Opción no válida. Selecciona 1, 2 o 3:',
+                            waitingFor: 'operation_type_option'
+                        };
+                    }
+                } else if (input.includes('property_type_option') || session.actionData.fieldToModify === 'tipo_propiedad') {
+                    const propertyTypes = { '1': 1, '2': 2, '3': 3, '4': 5, '5': 4 }; // IDs de DB
+                    validatedValue = propertyTypes[input];
+                    targetFieldName = 'tipo_propiedad_id';
+                    
+                    if (!validatedValue) {
+                        return {
+                            success: false,
+                            message: '❌ Opción no válida. Selecciona del 1 al 5:',
+                            waitingFor: 'property_type_option'
+                        };
+                    }
+                } else if (input.includes('property_status_option') || session.actionData.fieldToModify === 'estado_propiedad') {
+                    const statusTypes = { '1': 1, '2': 2, '3': 3, '4': 4 }; // IDs de DB
+                    validatedValue = statusTypes[input];
+                    targetFieldName = 'estado_propiedad_id';
+                    
+                    if (!validatedValue) {
+                        return {
+                            success: false,
+                            message: '❌ Opción no válida. Selecciona del 1 al 4:',
+                            waitingFor: 'property_status_option'
+                        };
+                    }
+                } else if (session.actionData.fieldToModify === 'precio_venta' || session.actionData.fieldToModify === 'precio_alquiler') {
                     const price = parseInt(input.replace(/\D/g, ''));
                     if (isNaN(price) || price < 0) {
                         return {
@@ -1015,22 +1240,14 @@ class MenuManager {
                         };
                     }
                     validatedValue = price;
-                // Campos de superficie y dimensiones son texto libre
-                } else if (session.actionData.fieldToModify === 'tipo_propiedad') {
-                    const tipos = {
-                        'casa': 'casa',
-                        'departamento': 'departamento',
-                        'terreno': 'terreno',
-                        'oficina': 'oficina',
-                        'local': 'local'
-                    };
-                    validatedValue = tipos[input.toLowerCase()] || input;
                 }
+                
+                session.currentAction = null;
                 
                 const updateData = {
                     propertyId: session.actionData.propertyId,
                     updateData: {
-                        [session.actionData.fieldToModify]: validatedValue
+                        [targetFieldName]: validatedValue
                     }
                 };
                 
@@ -1048,7 +1265,7 @@ class MenuManager {
                 session.actionStep = 3;
                 return {
                     success: true,
-                    message: '✏️ ¿Qué deseas modificar?\n\n1. Nombre\n2. Ubicación\n3. Precio\n4. Descripción\n5. Tipo de propiedad\n6. Superficie\n7. Dimensiones\n\nSelecciona una opción:',
+                    message: '✏️ ¿Qué deseas modificar?\n\n1. Nombre\n2. Ubicación\n3. Tipo de operación\n4. Precio de venta\n5. Precio de alquiler\n6. Tipo de propiedad\n7. Estado de la propiedad\n8. Superficie\n9. Dimensiones\n10. Descripción\n\nSelecciona una opción:',
                     waitingFor: 'modify_field'
                 };
         }
@@ -1256,43 +1473,44 @@ class MenuManager {
                         waitingFor: 'agent_identifier'
                     };
                 } else if (input === '2') {
-                    session.actionStep = 10; // Paso especial para después de mostrar lista
+                    session.actionStep = 10; // Paso especial para después de mostrar lista activos
                     return {
                         success: true,
-                        message: '📋 Obteniendo lista de agentes...',
+                        message: '📋 Obteniendo lista de agentes ACTIVOS...',
                         executeCommand: {
-                            type: 'list_agents',
-                            parameters: { forSelection: true }
+                            type: 'list_agents_by_status',
+                            parameters: { status: 1 } // 1 = activos
+                        }
+                    };
+                } else if (input === '3') {
+                    session.actionStep = 10; // Paso especial para después de mostrar lista inactivos
+                    return {
+                        success: true,
+                        message: '📋 Obteniendo lista de agentes INACTIVOS...',
+                        executeCommand: {
+                            type: 'list_agents_by_status',
+                            parameters: { status: 0 } // 0 = inactivos
                         }
                     };
                 }
                 break;
             
-            case 2: // Identificador
+            case 2: // Identificador - Auto-detectar estado
                 session.actionData.identifier = input;
                 session.actionStep = 3;
+                // Primero verificamos el estado del usuario para auto-detectar la acción
                 return {
                     success: true,
-                    message: '🔄 ¿Qué acción deseas realizar?\n\n1. Dar de BAJA (desactivar)\n2. Dar de ALTA (activar)',
-                    waitingFor: 'toggle_action'
+                    message: '🔍 Verificando estado del agente...',
+                    executeCommand: {
+                        type: 'check_agent_status',
+                        parameters: {
+                            identifier: input
+                        }
+                    }
                 };
             
-            case 3: // Acción
-                const action = input === '1' ? 'deactivate' : 'activate';
-                session.actionData.action = action;
-                
-                const confirmMsg = action === 'deactivate' 
-                    ? '⚠️ CONFIRMA: Se cerrará la sesión del agente y no podrá acceder al sistema.\n\n1. Sí, dar de baja\n2. Cancelar'
-                    : '✅ CONFIRMA: Se activará el agente y podrá acceder al sistema.\n\n1. Sí, dar de alta\n2. Cancelar';
-                
-                session.actionStep = 4;
-                return {
-                    success: true,
-                    message: confirmMsg,
-                    waitingFor: 'confirm_toggle'
-                };
-            
-            case 4: // Confirmación
+            case 3: // Confirmación directa (saltamos la selección de acción)
                 if (input !== '1') {
                     session.currentAction = null;
                     return {
@@ -1316,13 +1534,19 @@ class MenuManager {
                     generateQR: session.actionData.action === 'activate'
                 };
             
-            case 10: // ID después de mostrar lista
+            case 10: // ID después de mostrar lista - Auto-detectar estado
                 session.actionData.identifier = input;
                 session.actionStep = 3;
+                // Auto-detectar estado
                 return {
                     success: true,
-                    message: '🔄 ¿Qué acción deseas realizar?\n\n1. Dar de BAJA (desactivar)\n2. Dar de ALTA (activar)',
-                    waitingFor: 'toggle_action'
+                    message: '🔍 Verificando estado del agente...',
+                    executeCommand: {
+                        type: 'check_agent_status',
+                        parameters: {
+                            identifier: input
+                        }
+                    }
                 };
         }
     }
@@ -1450,6 +1674,323 @@ class MenuManager {
                     waitingFor: 'multiple_files',
                     expectsMedia: true
                 };
+        }
+    }
+
+    // Procesar eliminar cliente
+    processDeleteClient(session, input) {
+        switch (session.actionStep) {
+            case 1: // Elección inicial
+                if (input === '1') {
+                    session.actionStep = 2;
+                    return {
+                        success: true,
+                        message: '🔍 Ingresa el ID o teléfono del cliente:',
+                        waitingFor: 'client_identifier'
+                    };
+                } else if (input === '2') {
+                    session.actionStep = 10;
+                    return {
+                        success: true,
+                        message: '📋 Obteniendo lista de clientes...',
+                        executeCommand: {
+                            type: 'list_clients',
+                            parameters: { forSelection: true }
+                        }
+                    };
+                }
+                break;
+
+            case 2: // ID ingresado directamente
+                session.actionData.clientIdentifier = input;
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '🗑️ Eliminando cliente...',
+                    executeCommand: {
+                        type: 'delete_client',
+                        parameters: { clientIdentifier: input }
+                    }
+                };
+
+            case 10: // ID después de mostrar lista
+                session.actionData.clientIdentifier = input;
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '🗑️ Eliminando cliente...',
+                    executeCommand: {
+                        type: 'delete_client',
+                        parameters: { clientIdentifier: input }
+                    }
+                };
+        }
+    }
+
+    // Procesar reactivar cliente
+    processReactivateClient(session, input) {
+        switch (session.actionStep) {
+            case 1: // Elección inicial
+                if (input === '1') {
+                    session.actionStep = 2;
+                    return {
+                        success: true,
+                        message: '🔍 Ingresa el ID o teléfono del cliente:',
+                        waitingFor: 'client_identifier'
+                    };
+                } else if (input === '2') {
+                    session.actionStep = 10;
+                    return {
+                        success: true,
+                        message: '📋 Obteniendo clientes eliminados...',
+                        executeCommand: {
+                            type: 'list_clients_inactive',
+                            parameters: { forSelection: true }
+                        }
+                    };
+                }
+                break;
+
+            case 2: // ID ingresado directamente
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '✅ Reactivando cliente...',
+                    executeCommand: {
+                        type: 'reactivate_client',
+                        parameters: { clientIdentifier: input }
+                    }
+                };
+
+            case 10: // ID después de mostrar lista
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '✅ Reactivando cliente...',
+                    executeCommand: {
+                        type: 'reactivate_client',
+                        parameters: { clientIdentifier: input }
+                    }
+                };
+        }
+    }
+
+    // Procesar eliminar propiedad
+    processDeleteProperty(session, input, userData) {
+        switch (session.actionStep) {
+            case 1: // Elección inicial
+                if (input === '1') {
+                    session.actionStep = 2;
+                    return {
+                        success: true,
+                        message: '🔍 Ingresa el ID de la propiedad:',
+                        waitingFor: 'property_id'
+                    };
+                } else if (input === '2') {
+                    session.actionStep = 10;
+                    return {
+                        success: true,
+                        message: '📋 Obteniendo tus propiedades activas...',
+                        executeCommand: {
+                            type: 'list_properties',
+                            parameters: { 
+                                forSelection: true,
+                                filters: { usuario_id: userData.id }
+                            }
+                        }
+                    };
+                }
+                break;
+
+            case 2: // ID ingresado directamente
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '🗑️ Eliminando propiedad...',
+                    executeCommand: {
+                        type: 'delete_property',
+                        parameters: { propertyId: input }
+                    }
+                };
+
+            case 10: // ID después de mostrar lista
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '🗑️ Eliminando propiedad...',
+                    executeCommand: {
+                        type: 'delete_property',
+                        parameters: { propertyId: input }
+                    }
+                };
+        }
+    }
+
+    // Procesar reactivar propiedad
+    processReactivateProperty(session, input, userData) {
+        switch (session.actionStep) {
+            case 1: // Elección inicial
+                if (input === '1') {
+                    session.actionStep = 2;
+                    return {
+                        success: true,
+                        message: '🔍 Ingresa el ID de la propiedad:',
+                        waitingFor: 'property_id'
+                    };
+                } else if (input === '2') {
+                    session.actionStep = 10;
+                    return {
+                        success: true,
+                        message: '📋 Obteniendo tus propiedades eliminadas...',
+                        executeCommand: {
+                            type: 'list_properties_inactive',
+                            parameters: { 
+                                forSelection: true,
+                                filters: { usuario_id: userData.id }
+                            }
+                        }
+                    };
+                }
+                break;
+
+            case 2: // ID ingresado directamente
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '✅ Reactivando propiedad...',
+                    executeCommand: {
+                        type: 'activate_property',
+                        parameters: { propertyId: input }
+                    }
+                };
+
+            case 10: // ID después de mostrar lista
+                session.currentAction = null;
+                return {
+                    success: true,
+                    message: '✅ Reactivando propiedad...',
+                    executeCommand: {
+                        type: 'activate_property',
+                        parameters: { propertyId: input }
+                    }
+                };
+        }
+    }
+
+    // Procesar filtros avanzados
+    processAdvancedFilters(session, input, userData) {
+        switch (session.actionStep) {
+            case 1: // Selección de filtro
+                session.actionData.filterType = input;
+                session.actionStep = 2;
+
+                switch (input) {
+                    case '1': // Por tipo de operación
+                        return {
+                            success: true,
+                            message: '🎯 Selecciona el tipo de operación:\n\n1. Venta\n2. Alquiler\n3. Venta o Alquiler\n\nSelecciona:',
+                            waitingFor: 'operation_filter'
+                        };
+                    case '2': // Por tipo de propiedad
+                        return {
+                            success: true,
+                            message: '🏠 Selecciona el tipo de propiedad:\n\n1. Casa\n2. Departamento\n3. Terreno\n4. Oficina\n5. Local Comercial\n\nSelecciona:',
+                            waitingFor: 'property_type_filter'
+                        };
+                    case '3': // Por estado
+                        return {
+                            success: true,
+                            message: '📊 Selecciona el estado:\n\n1. Disponible\n2. Reservada\n3. Vendida\n4. Alquilada\n\nSelecciona:',
+                            waitingFor: 'status_filter'
+                        };
+                    case '4': // Personalizada
+                        return {
+                            success: true,
+                            message: '📝 Describe tu búsqueda personalizada:\n- "casas disponibles"\n- "departamentos en venta"\n- "terrenos zona norte"\n\nIngresa tu búsqueda:',
+                            waitingFor: 'custom_filter'
+                        };
+                    default:
+                        return {
+                            success: false,
+                            message: '❌ Opción no válida. Selecciona del 1 al 4:',
+                            waitingFor: 'advanced_filter_choice'
+                        };
+                }
+
+            case 2: // Aplicar filtro
+                session.currentAction = null;
+                
+                switch (session.actionData.filterType) {
+                    case '1': // Tipo de operación
+                        const operationTypes = { '1': 'venta', '2': 'alquiler', '3': 'venta o alquiler' };
+                        const selectedOperation = operationTypes[input];
+                        if (!selectedOperation) {
+                            return {
+                                success: false,
+                                message: '❌ Opción no válida. Selecciona 1, 2 o 3:',
+                                waitingFor: 'operation_filter'
+                            };
+                        }
+                        return {
+                            success: true,
+                            message: `🔍 Buscando propiedades para ${selectedOperation}...`,
+                            executeCommand: {
+                                type: 'search_by_operation',
+                                parameters: { operationType: selectedOperation }
+                            }
+                        };
+
+                    case '2': // Tipo de propiedad
+                        const propertyTypes = { '1': 'casa', '2': 'departamento', '3': 'terreno', '4': 'oficina', '5': 'local' };
+                        const selectedPropertyType = propertyTypes[input];
+                        if (!selectedPropertyType) {
+                            return {
+                                success: false,
+                                message: '❌ Opción no válida. Selecciona del 1 al 5:',
+                                waitingFor: 'property_type_filter'
+                            };
+                        }
+                        return {
+                            success: true,
+                            message: `🔍 Buscando ${selectedPropertyType}s...`,
+                            executeCommand: {
+                                type: 'search_by_property_type',
+                                parameters: { propertyType: selectedPropertyType }
+                            }
+                        };
+
+                    case '3': // Estado
+                        const statusTypes = { '1': 'disponible', '2': 'reservada', '3': 'vendida', '4': 'alquilada' };
+                        const selectedStatus = statusTypes[input];
+                        if (!selectedStatus) {
+                            return {
+                                success: false,
+                                message: '❌ Opción no válida. Selecciona del 1 al 4:',
+                                waitingFor: 'status_filter'
+                            };
+                        }
+                        return {
+                            success: true,
+                            message: `🔍 Buscando propiedades ${selectedStatus}s...`,
+                            executeCommand: {
+                                type: 'search_by_status',
+                                parameters: { status: selectedStatus }
+                            }
+                        };
+
+                    case '4': // Personalizada
+                        return {
+                            success: true,
+                            message: '🔍 Realizando búsqueda personalizada...',
+                            executeCommand: {
+                                type: 'search_properties',
+                                parameters: { 
+                                    filters: {},
+                                    searchText: input
+                                }
+                            }
+                        };
+                }
         }
     }
 

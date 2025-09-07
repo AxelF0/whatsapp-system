@@ -143,6 +143,55 @@ class ClientModel {
         const result = await this.client.query(query, values);
         return result.rows[0];
     }
+
+    // Buscar cliente por teléfono sin filtrar por estado (para baja/alta)
+    async findByPhoneAnyStatus(telefono) {
+        const query = `SELECT * FROM Cliente WHERE telefono = $1`;
+        const result = await this.client.query(query, [telefono]);
+        return result.rows[0];
+    }
+
+    // Buscar cliente por ID sin filtrar por estado (para baja/alta)
+    async findByIdAnyStatus(id) {
+        const query = `SELECT * FROM Cliente WHERE id = $1`;
+        const result = await this.client.query(query, [id]);
+        return result.rows[0];
+    }
+
+    // Listar todos los clientes sin filtrar por estado (para administración)
+    async findAllAnyStatus() {
+        const query = `
+            SELECT id, nombre, apellido, telefono, email, estado, fecha_creacion
+            FROM Cliente 
+            ORDER BY id ASC
+        `;
+        const result = await this.client.query(query);
+        return result.rows;
+    }
+
+    // Listar clientes por estado específico (activos/inactivos)
+    async findByStatus(estado) {
+        const query = `
+            SELECT id, nombre, apellido, telefono, email, estado, fecha_creacion
+            FROM Cliente 
+            WHERE estado = $1
+            ORDER BY id ASC
+        `;
+        const result = await this.client.query(query, [estado]);
+        return result.rows;
+    }
+
+    // Actualizar estado del cliente (activar/desactivar)
+    async updateStatus(id, estado) {
+        const query = `
+            UPDATE Cliente 
+            SET estado = $1, fecha_modificacion = NOW()
+            WHERE id = $2
+            RETURNING *
+        `;
+        const result = await this.client.query(query, [estado, id]);
+        return result.rows[0];
+    }
 }
 
 module.exports = ClientModel;

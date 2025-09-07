@@ -3,7 +3,7 @@ import re
 from typing import List, Tuple
 
 TOC_MAX_DIGIT_RATIO = 0.35   # pages with too many digits/punctuation → likely TOC
-MIN_CHUNK_CHARS = 380        # avoid tiny, noisy fragments
+MIN_CHUNK_CHARS = 50        # avoid tiny, noisy fragments
 TITLE_RE = re.compile(r"^(?:\d+(?:\.\d+)*\s+)?([A-ZÁÉÍÓÚÑ][^\n]{3,80})$", re.MULTILINE)
 
 def _digit_ratio(s: str) -> float:

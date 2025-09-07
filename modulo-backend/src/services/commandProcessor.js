@@ -1,6 +1,7 @@
 // servidor/modulo-backend/src/services/commandProcessor.js
 
 const axios = require('axios');
+const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
 
 class CommandProcessor {
     constructor(propertyService, clientService, userService) {
@@ -60,6 +61,14 @@ class CommandProcessor {
                 requiredRole: ['agente', 'gerente'],
                 handler: this.handleListProperties.bind(this)
             },
+            'list_properties_inactive': {
+                name: 'Listar Propiedades Eliminadas',
+                description: 'Muestra lista de propiedades eliminadas',
+                format: 'LISTAR PROPIEDADES ELIMINADAS',
+                example: 'LISTAR PROPIEDADES ELIMINADAS',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleListPropertiesInactive.bind(this)
+            },
             'property_details': {
                 name: 'Ver Detalles de Propiedad',
                 description: 'Muestra información completa de una propiedad',
@@ -110,6 +119,14 @@ class CommandProcessor {
                 requiredRole: ['agente', 'gerente'],
                 handler: this.handleListClients.bind(this)
             },
+            'list_clients_inactive': {
+                name: 'Listar Clientes Eliminados',
+                description: 'Muestra lista de clientes eliminados',
+                format: 'LISTAR CLIENTES ELIMINADOS',
+                example: 'LISTAR CLIENTES ELIMINADOS',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleListClientsInactive.bind(this)
+            },
             'client_history': {
                 name: 'Historial de Cliente',
                 description: 'Muestra el historial de interacciones con un cliente',
@@ -117,6 +134,70 @@ class CommandProcessor {
                 example: 'HISTORIAL CLIENTE 70123456',
                 requiredRole: ['agente', 'gerente'],
                 handler: this.handleClientHistory.bind(this)
+            },
+            'deactivate_client': {
+                name: 'Dar de Baja Cliente',
+                description: 'Desactiva un cliente del sistema',
+                format: 'BAJA CLIENTE [ID o teléfono]',
+                example: 'BAJA CLIENTE 70123456',
+                requiredRole: ['gerente'],
+                handler: this.handleDeactivateClient.bind(this)
+            },
+            'activate_client': {
+                name: 'Dar de Alta Cliente',
+                description: 'Reactiva un cliente desactivado',
+                format: 'ALTA CLIENTE [ID o teléfono]',
+                example: 'ALTA CLIENTE 70123456',
+                requiredRole: ['gerente'],
+                handler: this.handleActivateClient.bind(this)
+            },
+            'toggle_client': {
+                name: 'Cambiar Estado Cliente',
+                description: 'Alterna entre activo/inactivo un cliente',
+                format: 'CAMBIAR CLIENTE [ID o teléfono]',
+                example: 'CAMBIAR CLIENTE 70123456',
+                requiredRole: ['gerente'],
+                handler: this.handleToggleClient.bind(this)
+            },
+            'delete_property': {
+                name: 'Eliminar Propiedad',
+                description: 'Elimina lógicamente una propiedad',
+                format: 'ELIMINAR PROPIEDAD [ID]',
+                example: 'ELIMINAR PROPIEDAD 123',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleDeleteProperty.bind(this)
+            },
+            'activate_property': {
+                name: 'Activar Propiedad',
+                description: 'Reactiva una propiedad eliminada',
+                format: 'ACTIVAR PROPIEDAD [ID]',
+                example: 'ACTIVAR PROPIEDAD 123',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleActivateProperty.bind(this)
+            },
+            'delete_client': {
+                name: 'Eliminar Cliente',
+                description: 'Elimina lógicamente un cliente',
+                format: 'ELIMINAR CLIENTE [ID o teléfono]',
+                example: 'ELIMINAR CLIENTE 70123456',
+                requiredRole: ['gerente'],
+                handler: this.handleDeleteClient.bind(this)
+            },
+            'activate_client': {
+                name: 'Activar Cliente',
+                description: 'Reactiva un cliente eliminado',
+                format: 'REACTIVAR CLIENTE [ID o teléfono]',
+                example: 'REACTIVAR CLIENTE 70123456',
+                requiredRole: ['gerente'],
+                handler: this.handleReactivateClient.bind(this)
+            },
+            'reactivate_client': {
+                name: 'Reactivar Cliente',
+                description: 'Reactiva un cliente eliminado',
+                format: 'REACTIVAR CLIENTE [ID o teléfono]',
+                example: 'REACTIVAR CLIENTE 70123456',
+                requiredRole: ['gerente'],
+                handler: this.handleReactivateClient.bind(this)
             },
 
             // Comandos de usuarios (solo gerentes)
@@ -136,6 +217,14 @@ class CommandProcessor {
                 requiredRole: ['gerente'],
                 handler: this.handleUpdateAgent.bind(this)
             },
+            'check_agent_status': {
+                name: 'Verificar Estado de Agente',
+                description: 'Verifica el estado actual de un agente para auto-detectar la acción a realizar',
+                format: 'VERIFICAR ESTADO AGENTE [identificador]',
+                example: 'VERIFICAR ESTADO AGENTE 70987654',
+                requiredRole: ['gerente'],
+                handler: this.handleCheckAgentStatus.bind(this)
+            },
             'toggle_agent': {
                 name: 'Dar de Alta/Baja Agente',
                 description: 'Activa o desactiva un agente del sistema',
@@ -152,23 +241,13 @@ class CommandProcessor {
                 requiredRole: ['gerente'],
                 handler: this.handleListAgents.bind(this)
             },
-
-            // Comandos de reportes
-            'daily_report': {
-                name: 'Reporte Diario',
-                description: 'Genera reporte de actividad del día',
-                format: 'REPORTE DIARIO [fecha opcional]',
-                example: 'REPORTE DIARIO',
-                requiredRole: ['agente', 'gerente'],
-                handler: this.handleDailyReport.bind(this)
-            },
-            'monthly_report': {
-                name: 'Reporte Mensual',
-                description: 'Genera reporte de actividad del mes',
-                format: 'REPORTE MENSUAL [mes] [año]',
-                example: 'REPORTE MENSUAL 11 2024',
+            'list_agents_by_status': {
+                name: 'Listar Agentes por Estado',
+                description: 'Muestra lista de agentes filtrados por estado (activos/inactivos)',
+                format: 'LISTAR AGENTES [estado]',
+                example: 'LISTAR AGENTES activos',
                 requiredRole: ['gerente'],
-                handler: this.handleMonthlyReport.bind(this)
+                handler: this.handleListAgentsByStatus.bind(this)
             },
 
             // Comando de ayuda
@@ -179,6 +258,32 @@ class CommandProcessor {
                 example: 'AYUDA',
                 requiredRole: ['agente', 'gerente'],
                 handler: this.handleHelp.bind(this)
+            },
+
+            // Comandos de filtros de búsqueda
+            'search_by_operation': {
+                name: 'Buscar por Tipo de Operación',
+                description: 'Busca propiedades por tipo de operación',
+                format: 'BUSCAR OPERACION [venta/alquiler]',
+                example: 'BUSCAR OPERACION venta',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleSearchByOperation.bind(this)
+            },
+            'search_by_property_type': {
+                name: 'Buscar por Tipo de Propiedad',
+                description: 'Busca propiedades por tipo',
+                format: 'BUSCAR TIPO [casa/departamento/terreno/oficina/local]',
+                example: 'BUSCAR TIPO casa',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleSearchByPropertyType.bind(this)
+            },
+            'search_by_status': {
+                name: 'Buscar por Estado',
+                description: 'Busca propiedades por estado',
+                format: 'BUSCAR ESTADO [disponible/reservada/vendida/alquilada]',
+                example: 'BUSCAR ESTADO disponible',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleSearchByStatus.bind(this)
             }
         };
     }
@@ -244,23 +349,31 @@ class CommandProcessor {
         
         const propertyData = {
             usuario_id: commandData.user.id,
-            nombre_propiedad: params.propertyData?.nombre_propiedad || 'Propiedad sin nombre',
-            descripcion: params.propertyData?.descripcion || '',
-            precio: params.propertyData?.precio || 0,
-            ubicacion: params.propertyData?.ubicacion || '',
-            superficie: params.propertyData?.superficie || '',
-            dimensiones: params.propertyData?.dimensiones || '',
-            tipo_propiedad: params.propertyData?.tipo_propiedad || 'casa',
-            estado: 1
+            nombre_propiedad: params.propertyData?.nombre_propiedad || params.nombre_propiedad || 'Propiedad sin nombre',
+            descripcion: params.propertyData?.descripcion || params.descripcion || '',
+            precio_venta: params.propertyData?.precio_venta || params.precio_venta || null,
+            precio_alquiler: params.propertyData?.precio_alquiler || params.precio_alquiler || null,
+            ubicacion: params.propertyData?.ubicacion || params.ubicacion || '',
+            superficie: params.propertyData?.superficie || params.superficie || '',
+            dimensiones: params.propertyData?.dimensiones || params.dimensiones || '',
+            tipo_propiedad_id: params.propertyData?.tipo_propiedad_id || params.tipo_propiedad_id || null,
+            tipo_operacion_id: params.propertyData?.tipo_operacion_id || params.tipo_operacion_id || null,
+            estado_propiedad_id: params.propertyData?.estado_propiedad_id || params.estado_propiedad_id || 1
         };
 
         // Validar que los datos requeridos estén presentes
         if (!propertyData.nombre_propiedad || propertyData.nombre_propiedad === 'Propiedad sin nombre') {
             throw new Error('Nombre de la propiedad es requerido');
         }
-        if (!propertyData.precio || propertyData.precio <= 0) {
+        
+        // Validar que al menos un precio esté presente y sea válido
+        const hasValidSalePrice = propertyData.precio_venta && propertyData.precio_venta > 0;
+        const hasValidRentalPrice = propertyData.precio_alquiler && propertyData.precio_alquiler > 0;
+        
+        if (!hasValidSalePrice && !hasValidRentalPrice) {
             throw new Error('Precio válido es requerido');
         }
+        
         if (!propertyData.ubicacion) {
             throw new Error('Ubicación es requerida');
         }
@@ -273,7 +386,7 @@ class CommandProcessor {
         return {
             success: true,
             action: 'property_created',
-            message: `✅ Propiedad registrada exitosamente\n\n📋 ID: ${displayId}\n🏠 ${property.nombre_propiedad}\n💰 ${property.precio} Bs`,
+            message: `✅ Propiedad registrada exitosamente\n\n📋 **DATOS COMPLETOS:**\n🆔 ID: ${displayId}\n🏠 Nombre: ${property.nombre_propiedad}\n📍 Ubicación: ${property.ubicacion}\n${PropertyModel.formatPriceByOperationType(property)}\n🏗️ Tipo: ${property.tipo_propiedad_nombre || 'No especificado'}\n🎯 Operación: ${property.tipo_operacion_nombre || 'No especificada'}\n📏 Superficie: ${property.superficie || 'No especificada'}\n📐 Dimensiones: ${property.dimensiones || 'No especificadas'}\n📝 Descripción: ${property.descripcion || 'Sin descripción'}\n👨‍💼 Agente: ${commandData.user.name}\n📅 Fecha de registro: ${new Date().toLocaleDateString()}`,
             data: property,
             templateId: 'property_created',
             templateData: {
@@ -306,10 +419,12 @@ class CommandProcessor {
                 throw new Error('No se pudo actualizar la propiedad');
             }
 
+            const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
+
             return {
                 success: true,
                 action: 'property_updated',
-                message: `✅ Propiedad actualizada correctamente\n\n🏠 **${property.nombre_propiedad}**\n📍 ${property.ubicacion}\n💰 ${property.precio.toLocaleString()} Bs\n\n✨ Cambios aplicados exitosamente`,
+                message: `✅ Propiedad actualizada exitosamente\n\n📋 **DATOS COMPLETOS:**\n🏠 Nombre: ${property.nombre_propiedad}\n📍 Ubicación: ${property.ubicacion}\n${PropertyModel.formatPriceByOperationType(property)}\n🏗️ Tipo: ${property.tipo_propiedad_nombre || property.tipo_propiedad || 'No especificado'}\n📊 Estado: ${property.estado_propiedad_nombre || 'No especificado'}\n🎯 Operación: ${property.tipo_operacion_nombre || 'No especificado'}\n📏 Superficie: ${property.superficie || 'No especificada'}\n📐 Dimensiones: ${property.dimensiones || 'No especificadas'}\n📝 Descripción: ${property.descripcion || 'Sin descripción'}\n🆔 ID: ${property.id}\n📅 Última actualización: ${new Date().toLocaleDateString()}`,
                 data: property
             };
 
@@ -377,8 +492,8 @@ class CommandProcessor {
         
         const listMessage = properties.slice(0, 10).map((p, i) =>
             forSelection ? 
-                `${i + 1}. 🏠 **${p.nombre_propiedad}**\n   📍 ${p.ubicacion}\n   💰 ${p.precio.toLocaleString()} Bs\n   🆔 ID: ${p.id}` :
-                `${i + 1}. 🏠 ${p.nombre_propiedad}\n   📍 ${p.ubicacion}\n   💰 ${p.precio.toLocaleString()} Bs`
+                `${i + 1}. 🏠 **${p.nombre_propiedad}**\n   📍 ${p.ubicacion}\n   ${PropertyModel.formatPriceByOperationType(p)}\n   🎯 ${p.tipo_operacion_nombre}\n   🆔 ID: ${p.id}` :
+                `${i + 1}. 🏠 ${p.nombre_propiedad}\n   📍 ${p.ubicacion}\n   ${PropertyModel.formatPriceByOperationType(p)}\n   🎯 ${p.tipo_operacion_nombre}`
         ).join('\n\n');
 
         const title = forSelection ? 
@@ -393,14 +508,57 @@ class CommandProcessor {
             templateId: 'search_results',
             templateData: {
                 total: properties.length,
-                propiedades: properties.map(p => ({
-                    nombre: p.nombre_propiedad,
-                    ubicacion: p.ubicacion,
-                    precio: p.precio.toLocaleString(),
-                    dormitorios: p.dormitorios,
-                    banos: p.banos
-                }))
+                propiedades: properties.map(p => {
+                    const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
+                    return {
+                        nombre: p.nombre_propiedad,
+                        ubicacion: p.ubicacion,
+                        precio: PropertyModel.formatPriceByOperationType(p),
+                        tipo_operacion: p.tipo_operacion_nombre || 'No especificado',
+                        tipo_propiedad: p.tipo_propiedad_nombre || 'No especificado',
+                        estado_propiedad: p.estado_propiedad_nombre || 'No especificado',
+                        dormitorios: p.dormitorios,
+                        banos: p.banos
+                    };
+                })
             }
+        };
+    }
+
+    // Handler: Listar Propiedades Eliminadas
+    async handleListPropertiesInactive(commandData) {
+        const params = commandData.command.parameters;
+        const baseFilters = { estado: 0 }; // Solo propiedades eliminadas
+        
+        // Combinar con filtros adicionales (como usuario_id)
+        const filters = params.filters ? { ...baseFilters, ...params.filters } : baseFilters;
+
+        console.log('🗑️ handleListPropertiesInactive - Filtros:', filters);
+
+        const properties = await this.propertyService.list(filters);
+
+        console.log(`🗑️ handleListPropertiesInactive - Propiedades eliminadas encontradas: ${properties.length}`);
+
+        if (properties.length === 0) {
+            return {
+                success: true,
+                action: 'properties_inactive_listed',
+                message: '📋 No se encontraron propiedades eliminadas',
+                data: []
+            };
+        }
+
+        const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
+
+        const listMessage = properties.slice(0, 10).map((p, i) =>
+            `${i + 1}. 🏠 ${p.nombre_propiedad}\n   📍 ${p.ubicacion}\n   ${PropertyModel.formatPriceByOperationType(p)}\n   🎯 ${p.tipo_operacion_nombre || 'No especificado'}\n   🏗️ ${p.tipo_propiedad_nombre || 'No especificado'}\n   📊 ${p.estado_propiedad_nombre || 'No especificado'}\n   🆔 ID: ${p.id}`
+        ).join('\n\n');
+
+        return {
+            success: true,
+            action: 'properties_inactive_listed',
+            message: `🗑️ **Propiedades eliminadas** (${properties.length}):\n\n${listMessage}`,
+            data: properties
         };
     }
 
@@ -418,10 +576,12 @@ class CommandProcessor {
             throw new Error(`Propiedad ${params.propertyId} no encontrada`);
         }
 
+        const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
+
         return {
             success: true,
             action: 'property_details',
-            message: `🏠 **${property.nombre_propiedad}**\n\n📍 ${property.ubicacion}\n💰 ${property.precio.toLocaleString()} Bs\n📏 Superficie: ${property.superficie || 'No especificada'}\n📐 Dimensiones: ${property.dimensiones || 'No especificadas'}\n🏠 Tipo: ${property.tipo_propiedad || 'No especificado'}\n\n📝 ${property.descripcion || 'Sin descripción'}`,
+            message: `🏠 **${property.nombre_propiedad}**\n\n📍 ${property.ubicacion}\n${PropertyModel.formatPriceByOperationType(property)}\n🎯 Operación: ${property.tipo_operacion_nombre || 'No especificado'}\n🏗️ Tipo: ${property.tipo_propiedad_nombre || property.tipo_propiedad || 'No especificado'}\n📊 Estado: ${property.estado_propiedad_nombre || 'No especificado'}\n📏 Superficie: ${property.superficie || 'No especificada'}\n📐 Dimensiones: ${property.dimensiones || 'No especificadas'}\n\n📝 ${property.descripcion || 'Sin descripción'}`,
             data: property,
             templateId: 'property_info',
             templateData: property
@@ -705,7 +865,7 @@ class CommandProcessor {
 
             // Formatear lista de propiedades
             let propertyList = properties.map((prop, index) => 
-                `${index + 1}. 🏠 **${prop.nombre_propiedad}**\n   📍 ${prop.ubicacion}\n   💰 ${prop.precio.toLocaleString()} Bs\n   🆔 ID: ${prop.id}`
+                `${index + 1}. 🏠 **${prop.nombre_propiedad}**\n   📍 ${prop.ubicacion}\n   ${PropertyModel.formatPriceByOperationType(prop)}\n   🎯 ${prop.tipo_operacion_nombre || 'No especificado'}\n   🏗️ ${prop.tipo_propiedad_nombre || 'No especificado'}\n   📊 ${prop.estado_propiedad_nombre || 'No especificado'}\n   🆔 ID: ${prop.id}`
             ).join('\n\n');
 
             return {
@@ -723,6 +883,86 @@ class CommandProcessor {
             console.error('❌ Error buscando propiedades:', error.message);
             throw new Error('Error al buscar propiedades: ' + error.message);
         }
+    }
+
+    // Handler: Eliminar Propiedad (soft delete)
+    async handleDeleteProperty(commandData) {
+        const params = commandData.command.parameters;
+        const propertyId = params.propertyId;
+
+        if (!propertyId) {
+            throw new Error('ID de propiedad requerido');
+        }
+
+        // Verificar que la propiedad existe y está activa
+        const property = await this.propertyService.getById(propertyId);
+        if (!property) {
+            return {
+                success: false,
+                action: 'delete_property',
+                message: '❌ Propiedad no encontrada',
+                data: null
+            };
+        }
+
+        if (property.estado === 0) {
+            return {
+                success: true,
+                action: 'delete_property',
+                message: `ℹ️ La propiedad "${property.nombre_propiedad}" ya está eliminada`,
+                data: property
+            };
+        }
+
+        // Eliminar lógicamente (cambiar estado a 0)
+        const deletedProperty = await this.propertyService.toggleStatus(propertyId);
+
+        return {
+            success: true,
+            action: 'delete_property',
+            message: `🗑️ Propiedad **${property.nombre_propiedad}** eliminada exitosamente\n📍 ${property.ubicacion}\n🆔 ID: ${propertyId}`,
+            data: deletedProperty
+        };
+    }
+
+    // Handler: Activar Propiedad
+    async handleActivateProperty(commandData) {
+        const params = commandData.command.parameters;
+        const propertyId = params.propertyId;
+
+        if (!propertyId) {
+            throw new Error('ID de propiedad requerido');
+        }
+
+        // Verificar que la propiedad existe
+        const property = await this.propertyService.getByIdAnyStatus(propertyId);
+        if (!property) {
+            return {
+                success: false,
+                action: 'activate_property',
+                message: '❌ Propiedad no encontrada',
+                data: null
+            };
+        }
+
+        if (property.estado === 1) {
+            return {
+                success: true,
+                action: 'activate_property',
+                message: `ℹ️ La propiedad "${property.nombre_propiedad}" ya está activa`,
+                data: property
+            };
+        }
+
+        // Activar (cambiar estado a 1)
+        const activatedProperty = await this.propertyService.toggleStatus(propertyId);
+
+        return {
+            success: true,
+            action: 'activate_property',
+            message: `✅ Propiedad **${property.nombre_propiedad}** activada exitosamente\n📍 ${property.ubicacion}\n🆔 ID: ${propertyId}`,
+            data: activatedProperty
+        };
     }
 
     // Handler: Crear Cliente
@@ -811,7 +1051,7 @@ class CommandProcessor {
         return {
             success: true,
             action: 'client_updated',
-            message: `✅ Cliente actualizado exitosamente\n\n👤 ${client.nombre} ${client.apellido}\n📱 ${client.telefono}${client.email ? `\n📧 ${client.email}` : ''}`,
+            message: `✅ Cliente actualizado exitosamente\n\n📋 **DATOS ACTUALIZADOS:**\n👤 Nombre: ${client.nombre}\n👤 Apellido: ${client.apellido}\n📱 Teléfono: ${client.telefono}\n📧 Email: ${client.email || 'No especificado'}\n🆔 ID: ${client.id}\n📅 Última actualización: ${new Date().toLocaleDateString()}`,
             data: client
         };
     }
@@ -850,6 +1090,40 @@ class CommandProcessor {
         };
     }
 
+    // Handler: Listar Clientes Eliminados
+    async handleListClientsInactive(commandData) {
+        const clients = await this.clientService.listInactive();
+
+        if (clients.length === 0) {
+            return {
+                success: true,
+                action: 'clients_inactive_listed',
+                message: '📋 No hay clientes eliminados',
+                data: []
+            };
+        }
+
+        const listMessage = clients.slice(0, 15).map((c, i) => {
+            let clientInfo = `${i + 1}. 👤 ${c.nombre} ${c.apellido}\n   📱 ${c.telefono}`;
+            if (c.email) {
+                clientInfo += `\n   📧 ${c.email}`;
+            }
+            if (c.id) {
+                clientInfo += `\n   🏷️ ID: ${c.id}`;
+            }
+            return clientInfo;
+        }).join('\n\n');
+
+        const footerMessage = clients.length > 15 ? `\n\n... y ${clients.length - 15} clientes más` : '';
+
+        return {
+            success: true,
+            action: 'clients_inactive_listed',
+            message: `🗑️ **Clientes eliminados (${clients.length}):**\n\n${listMessage}${footerMessage}`,
+            data: clients
+        };
+    }
+
     async handleClientHistory(commandData) {
         const params = commandData.command.parameters;
         const telefono = params.telefono;
@@ -874,6 +1148,206 @@ class CommandProcessor {
             action: 'client_history',
             message: `📊 **Historial de ${telefono}:**\n\n${historyMessage}`,
             data: history
+        };
+    }
+
+    // Handler: Dar de Baja Cliente
+    async handleDeactivateClient(commandData) {
+        const params = commandData.command.parameters;
+        const identifier = params.identifier;
+
+        if (!identifier) {
+            throw new Error('ID o teléfono del cliente requerido');
+        }
+
+        // Buscar cliente por ID o teléfono (cualquier estado)
+        const client = await this.clientService.findClientByIdOrPhone(identifier);
+
+        if (!client) {
+            return {
+                success: false,
+                action: 'deactivate_client',
+                message: '❌ Cliente no encontrado',
+                data: null
+            };
+        }
+
+        if (client.estado === 0) {
+            return {
+                success: true,
+                action: 'deactivate_client',
+                message: `ℹ️ El cliente ${client.nombre} ${client.apellido} ya está inactivo`,
+                data: client
+            };
+        }
+
+        // Desactivar cliente
+        const updatedClient = await this.clientService.updateClientStatus(client.id, 0);
+
+        return {
+            success: true,
+            action: 'deactivate_client',
+            message: `✅ Cliente **${updatedClient.nombre} ${updatedClient.apellido}** dado de baja exitosamente\n📱 ${updatedClient.telefono}`,
+            data: updatedClient
+        };
+    }
+
+    // Handler: Dar de Alta Cliente
+    async handleActivateClient(commandData) {
+        const params = commandData.command.parameters;
+        const identifier = params.identifier;
+
+        if (!identifier) {
+            throw new Error('ID o teléfono del cliente requerido');
+        }
+
+        // Buscar cliente por ID o teléfono (cualquier estado)
+        const client = await this.clientService.findClientByIdOrPhone(identifier);
+
+        if (!client) {
+            return {
+                success: false,
+                action: 'activate_client',
+                message: '❌ Cliente no encontrado',
+                data: null
+            };
+        }
+
+        if (client.estado === 1) {
+            return {
+                success: true,
+                action: 'activate_client',
+                message: `ℹ️ El cliente ${client.nombre} ${client.apellido} ya está activo`,
+                data: client
+            };
+        }
+
+        // Activar cliente
+        const updatedClient = await this.clientService.updateClientStatus(client.id, 1);
+
+        return {
+            success: true,
+            action: 'activate_client',
+            message: `✅ Cliente **${updatedClient.nombre} ${updatedClient.apellido}** dado de alta exitosamente\n📱 ${updatedClient.telefono}`,
+            data: updatedClient
+        };
+    }
+
+    // Handler: Cambiar Estado Cliente (toggle)
+    async handleToggleClient(commandData) {
+        const params = commandData.command.parameters;
+        const identifier = params.identifier;
+
+        if (!identifier) {
+            throw new Error('ID o teléfono del cliente requerido');
+        }
+
+        // Buscar cliente por ID o teléfono (cualquier estado)
+        const client = await this.clientService.findClientByIdOrPhone(identifier);
+
+        if (!client) {
+            return {
+                success: false,
+                action: 'toggle_client',
+                message: '❌ Cliente no encontrado',
+                data: null
+            };
+        }
+
+        // Alternar estado
+        const newStatus = client.estado === 1 ? 0 : 1;
+        const updatedClient = await this.clientService.updateClientStatus(client.id, newStatus);
+
+        const action = newStatus === 1 ? 'activado' : 'desactivado';
+        const emoji = newStatus === 1 ? '✅' : '❌';
+
+        return {
+            success: true,
+            action: 'toggle_client',
+            message: `${emoji} Cliente **${updatedClient.nombre} ${updatedClient.apellido}** ${action} exitosamente\n📱 ${updatedClient.telefono}`,
+            data: updatedClient
+        };
+    }
+
+    // Handler: Eliminar Cliente (soft delete)
+    async handleDeleteClient(commandData) {
+        const params = commandData.command.parameters;
+        const identifier = params.identifier || params.clientIdentifier;
+
+        if (!identifier) {
+            throw new Error('ID o teléfono del cliente requerido');
+        }
+
+        // Buscar cliente por ID o teléfono (cualquier estado)
+        const client = await this.clientService.findClientByIdOrPhone(identifier);
+
+        if (!client) {
+            return {
+                success: false,
+                action: 'delete_client',
+                message: '❌ Cliente no encontrado',
+                data: null
+            };
+        }
+
+        if (client.estado === 0) {
+            return {
+                success: true,
+                action: 'delete_client',
+                message: `ℹ️ El cliente ${client.nombre} ${client.apellido} ya está eliminado`,
+                data: client
+            };
+        }
+
+        // Eliminar lógicamente (cambiar estado a 0)
+        const deletedClient = await this.clientService.updateClientStatus(client.id, 0);
+
+        return {
+            success: true,
+            action: 'delete_client',
+            message: `🗑️ Cliente **${deletedClient.nombre} ${deletedClient.apellido}** eliminado exitosamente\n📱 ${deletedClient.telefono}`,
+            data: deletedClient
+        };
+    }
+
+    // Handler: Reactivar Cliente
+    async handleReactivateClient(commandData) {
+        const params = commandData.command.parameters;
+        const identifier = params.identifier || params.clientIdentifier;
+
+        if (!identifier) {
+            throw new Error('ID o teléfono del cliente requerido');
+        }
+
+        // Buscar cliente por ID o teléfono (cualquier estado)
+        const client = await this.clientService.findClientByIdOrPhone(identifier);
+
+        if (!client) {
+            return {
+                success: false,
+                action: 'activate_client',
+                message: '❌ Cliente no encontrado',
+                data: null
+            };
+        }
+
+        if (client.estado === 1) {
+            return {
+                success: true,
+                action: 'activate_client',
+                message: `ℹ️ El cliente ${client.nombre} ${client.apellido} ya está activo`,
+                data: client
+            };
+        }
+
+        // Reactivar (cambiar estado a 1)
+        const reactivatedClient = await this.clientService.updateClientStatus(client.id, 1);
+
+        return {
+            success: true,
+            action: 'activate_client',
+            message: `♻️ Cliente **${reactivatedClient.nombre} ${reactivatedClient.apellido}** reactivado exitosamente\n📱 ${reactivatedClient.telefono}`,
+            data: reactivatedClient
         };
     }
 
@@ -906,8 +1380,9 @@ class CommandProcessor {
             return {
                 success: true,
                 action: 'agent_created',
-                message: `✅ ${cargoNombre} registrado exitosamente\n\n👨‍💼 ${agent.nombre} ${agent.apellido || ''}\n📱 ${agent.telefono}\n👔 ${cargoNombre}\n🆔 ID: ${agent.id}`,
-                data: agent
+                message: `✅ ${cargoNombre} registrado exitosamente\n\n📋 **DATOS COMPLETOS:**\n👨‍💼 Nombre: ${agent.nombre} ${agent.apellido || ''}\n📱 Teléfono: ${agent.telefono}\n👔 Cargo: ${cargoNombre}\n📊 Estado: 🟢 Activo\n🆔 ID: ${agent.id}\n📅 Fecha de registro: ${new Date().toLocaleDateString()}`,
+                data: agent,
+                generateQR: false // No generar QR inmediatamente
             };
 
         } catch (error) {
@@ -932,52 +1407,57 @@ class CommandProcessor {
                 throw new Error('Datos de actualización requeridos');
             }
 
-            // Buscar el usuario por ID o teléfono usando la API de BD
+            // Buscar el usuario por ID o teléfono SIN FILTRAR POR ESTADO
             let user = null;
             
             // Si es un número, buscar por ID primero
             if (!isNaN(identifier)) {
                 try {
-                    // Buscar todos los usuarios y filtrar por ID
-                    const response = await axios.get(`${this.databaseUrl}/api/users`, { 
-                        timeout: 15000,
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    if (response.data.success) {
-                        user = response.data.data.find(u => u.id === parseInt(identifier));
-                    }
-                    
-                    // Si no se encuentra por ID, buscar por teléfono
-                    if (!user) {
-                        const phoneResponse = await axios.get(
-                            `${this.databaseUrl}/api/users/validate/${identifier}`,
-                            { 
-                                timeout: 15000,
-                                headers: { 'Content-Type': 'application/json' }
-                            }
-                        );
-                        if (phoneResponse.data.valid) {
-                            user = phoneResponse.data.data;
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error buscando por ID, intentando por teléfono:', error.message);
-                }
-            } else {
-                // Buscar por teléfono
-                try {
-                    const response = await axios.get(
-                        `${this.databaseUrl}/api/users/validate/${identifier}`,
+                    console.log(`🔍 UpdateAgent: Buscando usuario por ID: ${identifier}`);
+                    // Buscar por ID sin filtrar estado
+                    const idResponse = await axios.get(
+                        `${this.databaseUrl}/api/users/find-any-status-by-id/${identifier}`,
                         { 
                             timeout: 15000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
-                    if (response.data.valid) {
+                    if (idResponse.data.success && idResponse.data.data) {
+                        user = idResponse.data.data;
+                        console.log(`✅ UpdateAgent: Usuario encontrado por ID: ${user.nombre}, Estado: ${user.estado}`);
+                    }
+                    
+                    // Si no se encuentra por ID, buscar por teléfono sin filtrar estado
+                    if (!user) {
+                        const phoneResponse = await axios.get(
+                            `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
+                            { 
+                                timeout: 15000,
+                                headers: { 'Content-Type': 'application/json' }
+                            }
+                        );
+                        if (phoneResponse.data.success && phoneResponse.data.data) {
+                            user = phoneResponse.data.data;
+                        }
+                    }
+                } catch (error) {
+                    console.log('❌ UpdateAgent: Error buscando por ID, intentando por teléfono:', error.message);
+                }
+            } else {
+                // Buscar por teléfono sin filtrar estado
+                try {
+                    const response = await axios.get(
+                        `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
+                        { 
+                            timeout: 15000,
+                            headers: { 'Content-Type': 'application/json' }
+                        }
+                    );
+                    if (response.data.success && response.data.data) {
                         user = response.data.data;
                     }
                 } catch (error) {
-                    console.log('Error buscando por teléfono:', error.message);
+                    console.log('❌ UpdateAgent: Error buscando por teléfono:', error.message);
                 }
             }
 
@@ -1018,7 +1498,7 @@ class CommandProcessor {
             return {
                 success: true,
                 action: 'agent_updated',
-                message: `✅ ${cargoNombre} actualizado exitosamente\n\n👨‍💼 ${updatedAgent.nombre} ${updatedAgent.apellido || ''}\n📱 ${updatedAgent.telefono}\n👔 ${cargoNombre}\n🆔 ID: ${updatedAgent.id}`,
+                message: `✅ ${cargoNombre} actualizado exitosamente\n\n📋 **DATOS ACTUALIZADOS:**\n👨‍💼 Nombre: ${updatedAgent.nombre} ${updatedAgent.apellido || ''}\n📱 Teléfono: ${updatedAgent.telefono}\n👔 Cargo: ${cargoNombre}\n📊 Estado: ${updatedAgent.estado === 1 ? '🟢 Activo' : '🔴 Inactivo'}\n🆔 ID: ${updatedAgent.id}\n📅 Última actualización: ${new Date().toLocaleDateString()}`,
                 data: updatedAgent
             };
 
@@ -1093,13 +1573,204 @@ class CommandProcessor {
         }
     }
 
+    // Handler: Listar Agentes por Estado (activos/inactivos)
+    async handleListAgentsByStatus(commandData) {
+        const params = commandData.command.parameters;
+        const status = params.status; // 1 para activos, 0 para inactivos
+
+        console.log(`📋 Listando agentes ${status === 1 ? 'ACTIVOS' : 'INACTIVOS'}`);
+
+        try {
+            // Usar la nueva API para obtener usuarios por estado
+            const response = await axios.get(
+                `${this.databaseUrl}/api/users/by-status/${status}`,
+                { timeout: 10000 }
+            );
+
+            if (!response.data.success || !response.data.data || response.data.data.length === 0) {
+                const statusText = status === 1 ? 'activos' : 'inactivos';
+                return {
+                    success: true,
+                    action: 'agents_listed_by_status',
+                    message: `📋 No hay agentes ni gerentes ${statusText} registrados`,
+                    data: []
+                };
+            }
+
+            const users = response.data.data;
+            const statusText = status === 1 ? 'ACTIVOS' : 'INACTIVOS';
+            const statusEmoji = status === 1 ? '🟢' : '🔴';
+
+            console.log(`✅ Encontrados ${users.length} usuarios ${statusText.toLowerCase()}`);
+
+            const listMessage = users.map((user, i) => {
+                const cargoNombre = user.cargo_nombre || (user.cargo_id === 2 ? 'Gerente' : 'Agente');
+                const estadoTexto = status === 1 ? '🟢 Activo' : '🔴 Inactivo';
+                
+                return `${i + 1}. 👨‍💼 **${user.nombre} ${user.apellido || ''}**\n   📱 ${user.telefono}\n   👔 ${cargoNombre}\n   📊 ${estadoTexto}\n   🆔 ID: ${user.id}`;
+            }).join('\n\n');
+
+            return {
+                success: true,
+                action: 'agents_listed_by_status',
+                message: `📊 **Agentes ${statusText} (${users.length}):**\n\n${listMessage}\n\n💡 *Ingresa el ID o teléfono del agente a ${status === 1 ? 'dar de BAJA' : 'dar de ALTA'}:*`,
+                data: users
+            };
+
+        } catch (error) {
+            console.error('❌ Error listando usuarios por estado:', error.message);
+            throw new Error('Error al listar agentes por estado: ' + error.message);
+        }
+    }
+
+    // Handler: Verificar Estado de Agente (para auto-detectar acción)
+    async handleCheckAgentStatus(commandData) {
+        const params = commandData.command.parameters;
+        const identifier = params.identifier;
+
+        console.log(`🔍 Verificando estado de agente: ${identifier}`);
+
+        try {
+            if (!identifier) {
+                throw new Error('Identificador del agente requerido');
+            }
+
+            // Buscar el usuario por ID o teléfono SIN FILTRAR POR ESTADO (para baja/alta)
+            let user = null;
+            
+            // Si es un número, buscar por ID primero
+            if (!isNaN(identifier)) {
+                try {
+                    console.log(`🔍 CommandProcessor: Buscando usuario por ID: ${identifier}`);
+                    // Buscar por ID sin filtrar estado
+                    const idResponse = await axios.get(
+                        `${this.databaseUrl}/api/users/find-any-status-by-id/${identifier}`,
+                        { 
+                            timeout: 15000,
+                            headers: { 'Content-Type': 'application/json' }
+                        }
+                    );
+                    console.log(`📊 CommandProcessor: Respuesta API por ID:`, idResponse.data);
+                    if (idResponse.data.success && idResponse.data.data) {
+                        user = idResponse.data.data;
+                        console.log(`✅ CommandProcessor: Usuario encontrado por ID: ${user.nombre}, Estado: ${user.estado}`);
+                    }
+                    
+                    // Si no se encuentra por ID, buscar por teléfono sin filtrar estado
+                    if (!user) {
+                        console.log(`🔍 CommandProcessor: No encontrado por ID, buscando por teléfono: ${identifier}`);
+                        const phoneResponse = await axios.get(
+                            `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
+                            { 
+                                timeout: 15000,
+                                headers: { 'Content-Type': 'application/json' }
+                            }
+                        );
+                        console.log(`📊 CommandProcessor: Respuesta API por teléfono:`, phoneResponse.data);
+                        if (phoneResponse.data.success && phoneResponse.data.data) {
+                            user = phoneResponse.data.data;
+                            console.log(`✅ CommandProcessor: Usuario encontrado por teléfono: ${user.nombre}, Estado: ${user.estado}`);
+                        }
+                    }
+                } catch (error) {
+                    console.log('Error buscando por ID, intentando por teléfono:', error.message);
+                }
+            } else {
+                // Buscar por teléfono sin filtrar estado
+                try {
+                    console.log(`🔍 CommandProcessor: Buscando directamente por teléfono: ${identifier}`);
+                    const response = await axios.get(
+                        `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
+                        { 
+                            timeout: 15000,
+                            headers: { 'Content-Type': 'application/json' }
+                        }
+                    );
+                    console.log(`📊 CommandProcessor: Respuesta API por teléfono directo:`, response.data);
+                    if (response.data.success && response.data.data) {
+                        user = response.data.data;
+                        console.log(`✅ CommandProcessor: Usuario encontrado por teléfono directo: ${user.nombre}, Estado: ${user.estado}`);
+                    }
+                } catch (error) {
+                    console.log('❌ Error buscando por teléfono:', error.message);
+                }
+            }
+
+            if (!user) {
+                console.log(`❌ CommandProcessor: Usuario con identificador ${identifier} no encontrado en ninguna búsqueda`);
+                throw new Error(`Usuario con identificador ${identifier} no encontrado`);
+            } else {
+                console.log(`✅ CommandProcessor: Usuario final encontrado - ID: ${user.id}, Nombre: ${user.nombre}, Estado: ${user.estado}`);
+            }
+
+            // Detectar estado actual y preparar mensaje de confirmación
+            const currentStatus = user.estado;
+            const isActive = currentStatus === 1;
+            const cargoNombre = user.cargo_nombre || (user.cargo_id === 2 ? 'Gerente' : 'Agente');
+            const statusEmoji = isActive ? '🟢' : '🔴';
+            const statusText = isActive ? 'Activo' : 'Inactivo';
+            
+            // Determinar la acción a realizar (contraria al estado actual)
+            const actionToTake = isActive ? 'deactivate' : 'activate';
+            const actionText = isActive ? 'DAR DE BAJA' : 'DAR DE ALTA';
+            const futureText = isActive ? 'DESACTIVADO' : 'ACTIVADO';
+            
+            // Mensaje de confirmación específico según el estado
+            const confirmMsg = isActive 
+                ? `⚠️ CONFIRMA: Se dará de BAJA al ${cargoNombre.toLowerCase()} y se cerrará su sesión.\n\n👨‍💼 ${user.nombre} ${user.apellido || ''}\n📊 Estado actual: ${statusEmoji} ${statusText}\n📱 ${user.telefono}\n\n1. Sí, dar de BAJA\n2. Cancelar`
+                : `✅ CONFIRMA: Se dará de ALTA al ${cargoNombre.toLowerCase()} y podrá acceder al sistema.\n\n👨‍💼 ${user.nombre} ${user.apellido || ''}\n📊 Estado actual: ${statusEmoji} ${statusText}\n📱 ${user.telefono}\n\n1. Sí, dar de ALTA\n2. Cancelar`;
+
+            console.log(`✅ Usuario encontrado: ${user.nombre}, Estado actual: ${statusText}, Acción a realizar: ${actionText}`);
+
+            return {
+                success: true,
+                action: 'agent_status_checked',
+                message: confirmMsg,
+                data: {
+                    user: user,
+                    currentStatus: isActive,
+                    actionToTake: actionToTake,
+                    actionText: actionText
+                },
+                requiresConfirmation: true,
+                nextAction: {
+                    type: 'toggle_agent_confirmed',
+                    identifier: identifier,
+                    action: actionToTake
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ Error verificando estado de agente:', error.message);
+            
+            if (error.response) {
+                const status = error.response.status;
+                const errorData = error.response.data;
+                
+                if (status === 500) {
+                    throw new Error(`Error interno del servidor de BD: ${errorData?.error || 'Error desconocido'}`);
+                } else if (status === 404) {
+                    throw new Error(`Usuario no encontrado en la base de datos`);
+                } else {
+                    throw new Error(`Error HTTP ${status}: ${errorData?.error || error.message}`);
+                }
+            } else if (error.code === 'ECONNREFUSED') {
+                throw new Error('No se puede conectar con la base de datos. Verificar conexión.');
+            } else if (error.code === 'ETIMEDOUT') {
+                throw new Error('Timeout conectando con la base de datos. Inténtalo nuevamente.');
+            } else {
+                throw new Error('Error verificando estado: ' + error.message);
+            }
+        }
+    }
+
     // Handler: Cambiar Estado de Agente (Alta/Baja)
     async handleToggleAgent(commandData) {
         const params = commandData.command.parameters;
         const identifier = params.identifier;
         const action = params.action; // 'activate' o 'deactivate'
 
-        console.log(`🔄 Cambiando estado de agente: ${identifier} -> ${action}`);
+        console.log(`🔄 ToggleAgent: Cambiando estado de agente: ${identifier} -> ${action}`);
 
         try {
             if (!identifier) {
@@ -1110,57 +1781,72 @@ class CommandProcessor {
                 throw new Error('Acción inválida. Debe ser "activate" o "deactivate"');
             }
 
-            // Buscar el usuario por ID o teléfono usando la API de BD
+            // Buscar el usuario por ID o teléfono SIN FILTRAR POR ESTADO (igual que check_agent_status)
             let user = null;
             
             // Si es un número, buscar por ID primero
             if (!isNaN(identifier)) {
                 try {
-                    // Buscar todos los usuarios y filtrar por ID
-                    const response = await axios.get(`${this.databaseUrl}/api/users`, { 
-                        timeout: 15000,
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    if (response.data.success) {
-                        user = response.data.data.find(u => u.id === parseInt(identifier));
-                    }
-                    
-                    // Si no se encuentra por ID, buscar por teléfono
-                    if (!user) {
-                        const phoneResponse = await axios.get(
-                            `${this.databaseUrl}/api/users/validate/${identifier}`,
-                            { 
-                                timeout: 15000,
-                                headers: { 'Content-Type': 'application/json' }
-                            }
-                        );
-                        if (phoneResponse.data.valid) {
-                            user = phoneResponse.data.data;
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error buscando por ID, intentando por teléfono:', error.message);
-                }
-            } else {
-                // Buscar por teléfono
-                try {
-                    const response = await axios.get(
-                        `${this.databaseUrl}/api/users/validate/${identifier}`,
+                    console.log(`🔍 ToggleAgent: Buscando usuario por ID: ${identifier}`);
+                    // Buscar por ID sin filtrar estado
+                    const idResponse = await axios.get(
+                        `${this.databaseUrl}/api/users/find-any-status-by-id/${identifier}`,
                         { 
                             timeout: 15000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
-                    if (response.data.valid) {
-                        user = response.data.data;
+                    console.log(`📊 ToggleAgent: Respuesta API por ID:`, idResponse.data);
+                    if (idResponse.data.success && idResponse.data.data) {
+                        user = idResponse.data.data;
+                        console.log(`✅ ToggleAgent: Usuario encontrado por ID: ${user.nombre}, Estado: ${user.estado}`);
+                    }
+                    
+                    // Si no se encuentra por ID, buscar por teléfono sin filtrar estado
+                    if (!user) {
+                        console.log(`🔍 ToggleAgent: No encontrado por ID, buscando por teléfono: ${identifier}`);
+                        const phoneResponse = await axios.get(
+                            `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
+                            { 
+                                timeout: 15000,
+                                headers: { 'Content-Type': 'application/json' }
+                            }
+                        );
+                        console.log(`📊 ToggleAgent: Respuesta API por teléfono:`, phoneResponse.data);
+                        if (phoneResponse.data.success && phoneResponse.data.data) {
+                            user = phoneResponse.data.data;
+                            console.log(`✅ ToggleAgent: Usuario encontrado por teléfono: ${user.nombre}, Estado: ${user.estado}`);
+                        }
                     }
                 } catch (error) {
-                    console.log('Error buscando por teléfono:', error.message);
+                    console.log('❌ ToggleAgent: Error buscando por ID, intentando por teléfono:', error.message);
+                }
+            } else {
+                // Buscar por teléfono sin filtrar estado
+                try {
+                    console.log(`🔍 ToggleAgent: Buscando directamente por teléfono: ${identifier}`);
+                    const response = await axios.get(
+                        `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
+                        { 
+                            timeout: 15000,
+                            headers: { 'Content-Type': 'application/json' }
+                        }
+                    );
+                    console.log(`📊 ToggleAgent: Respuesta API por teléfono directo:`, response.data);
+                    if (response.data.success && response.data.data) {
+                        user = response.data.data;
+                        console.log(`✅ ToggleAgent: Usuario encontrado por teléfono directo: ${user.nombre}, Estado: ${user.estado}`);
+                    }
+                } catch (error) {
+                    console.log('❌ ToggleAgent: Error buscando por teléfono:', error.message);
                 }
             }
 
             if (!user) {
+                console.log(`❌ ToggleAgent: Usuario con identificador ${identifier} no encontrado en ninguna búsqueda`);
                 throw new Error(`Usuario con identificador ${identifier} no encontrado`);
+            } else {
+                console.log(`✅ ToggleAgent: Usuario final encontrado - ID: ${user.id}, Nombre: ${user.nombre}, Estado: ${user.estado}`);
             }
 
             // Preparar datos completos para la actualización (evitar campos null)
@@ -1196,12 +1882,43 @@ class CommandProcessor {
             const statusEmoji = newStatus === 1 ? '🟢' : '🔴';
             const cargoNombre = updatedUser.cargo_nombre || (updatedUser.cargo_id === 2 ? 'Gerente' : 'Agente');
 
-            return {
+            let whatsappMessage = '';
+            let generateQR = false;
+
+            // 🆕 SI SE ESTÁ ACTIVANDO, MARCAR PARA CONFIGURACIÓN WHATSAPP POSTERIOR
+            if (action === 'activate') {
+                whatsappMessage = '\n\n📱 **WHATSAPP:** Se configurará tu acceso al sistema';
+                generateQR = false;
+                
+                // Este resultado se usará en el backend principal para configurar WhatsApp
+            }
+            // 🆕 SI SE ESTÁ DESACTIVANDO, CERRAR SESIÓN WHATSAPP AUTOMÁTICAMENTE
+            else if (action === 'deactivate') {
+                await this.closeWhatsAppSession(updatedUser);
+                whatsappMessage = '\n\n🚫 **WHATSAPP:** Sesión cerrada - sin acceso al sistema';
+            }
+
+            const result = {
                 success: true,
                 action: 'agent_toggled',
-                message: `✅ ${cargoNombre} ${actionText} exitosamente\n\n👨‍💼 ${updatedUser.nombre} ${updatedUser.apellido || ''}\n📱 ${updatedUser.telefono}\n👔 ${cargoNombre}\n📊 Estado: ${statusEmoji} ${newStatus === 1 ? 'Activo' : 'Inactivo'}\n🆔 ID: ${updatedUser.id}`,
-                data: updatedUser
+                message: `✅ ${cargoNombre} ${actionText} exitosamente\n\n📋 **DATOS COMPLETOS:**\n👨‍💼 Nombre: ${updatedUser.nombre} ${updatedUser.apellido || ''}\n📱 Teléfono: ${updatedUser.telefono}\n👔 Cargo: ${cargoNombre}\n📊 Estado: ${statusEmoji} ${newStatus === 1 ? 'Activo' : 'Inactivo'}\n🆔 ID: ${updatedUser.id}\n📅 Cambio de estado: ${new Date().toLocaleDateString()}${whatsappMessage}`,
+                data: updatedUser,
+                generateQR: generateQR
             };
+
+            // Agregar información para configuración WhatsApp si es activación
+            if (action === 'activate') {
+                result.needsWhatsAppSetup = {
+                    agentId: updatedUser.id,
+                    agentPhone: updatedUser.telefono,
+                    agentName: `${updatedUser.nombre} ${updatedUser.apellido || ''}`.trim(),
+                    cargoNombre: cargoNombre,
+                    isReactivation: true,
+                    managerPhone: commandData.user.phone // ✅ Teléfono del gerente que está reactivando
+                };
+            }
+
+            return result;
 
         } catch (error) {
             console.error('❌ Error cambiando estado de agente:', error.message);
@@ -1228,39 +1945,6 @@ class CommandProcessor {
                 throw new Error('Error cambiando estado: ' + error.message);
             }
         }
-    }
-
-    // Handler: Reporte Diario
-    async handleDailyReport(commandData) {
-        const params = commandData.command.parameters;
-        const date = params.date || new Date().toISOString().split('T')[0];
-
-        const report = await this.generateDailyReport(date);
-
-        return {
-            success: true,
-            action: 'daily_report',
-            message: report.message,
-            data: report,
-            templateId: 'daily_report',
-            templateData: report.templateData
-        };
-    }
-
-    // Handler: Reporte Mensual
-    async handleMonthlyReport(commandData) {
-        const params = commandData.command.parameters;
-        const month = params.month || new Date().getMonth() + 1;
-        const year = params.year || new Date().getFullYear();
-
-        const report = await this.generateMonthlyReport(month, year);
-
-        return {
-            success: true,
-            action: 'monthly_report',
-            message: report.message,
-            data: report
-        };
     }
 
     // Handler: Ayuda
@@ -1294,118 +1978,143 @@ class CommandProcessor {
 
     // ==================== MÉTODOS DE SOPORTE ====================
 
-    // Generar reporte diario
-    async generateDailyReport(date) {
-        console.log('📊 Generando reporte diario para:', date);
-
+    // Crear sesión de WhatsApp para un agente/gerente nuevo
+    async createWhatsAppSession(agent) {
         try {
-            // Obtener estadísticas del día
-            const stats = {
-                properties: await this.propertyService.getDailyStats(date),
-                clients: await this.clientService.getDailyStats(date),
-                users: await this.userService.getDailyStats(date)
-            };
+            console.log(`📱 Creando sesión WhatsApp para: ${agent.nombre} (${agent.telefono})`);
+            
+            const whatsappUrl = process.env.WHATSAPP_URL || 'http://localhost:3001';
+            const axios = require('axios');
+            
+            // Usar SOLO el número
+            const sessionType = agent.telefono.replace(/[^\d]/g, '');
+            const userName = `${agent.nombre} ${agent.apellido || ''}`.trim();
+            
+            // Crear sesión individual en el módulo WhatsApp
+            const response = await axios.post(
+                `${whatsappUrl}/api/sessions/create`,
+                {
+                    sessionType: sessionType,
+                    phone: agent.telefono,
+                    name: userName
+                },
+                { timeout: 30000 }
+            );
+            
+            if (response.data.success) {
+                console.log(`✅ Sesión WhatsApp creada para ${agent.nombre}`);
+                
+                // 🆕 ENVIAR QR VÍA WHATSAPP AL NUEVO AGENTE
+                await this.sendQRToAgent(agent, sessionType);
+                
+                return response.data;
+            } else {
+                console.error(`❌ Error creando sesión WhatsApp para ${agent.nombre}:`, response.data.error);
+                return null;
+            }
+            
+        } catch (error) {
+            console.error(`❌ Error conectando con módulo WhatsApp para ${agent.nombre}:`, error.message);
+            // No lanzar error para no interrumpir el registro del agente
+            return null;
+        }
+    }
 
-            const message = `📊 **Reporte Diario - ${date}**
+    // Cerrar sesión de WhatsApp para un agente desactivado
+    async closeWhatsAppSession(agent) {
+        try {
+            console.log(`🚫 Cerrando sesión WhatsApp para: ${agent.nombre} (${agent.telefono})`);
+            
+            const whatsappUrl = process.env.WHATSAPP_URL || 'http://localhost:3001';
+            const axios = require('axios');
+            
+            // Usar SOLO el número
+            const sessionType = agent.telefono.replace(/[^\d]/g, '');
+            
+            // Cerrar sesión individual en el módulo WhatsApp Y eliminar archivos de autenticación
+            const response = await axios.post(
+                `${whatsappUrl}/api/sessions/${sessionType}/stop`,
+                {
+                    removeAuth: true,    // Eliminar archivos de autenticación
+                    phone: agent.telefono
+                },
+                { timeout: 15000 }
+            );
+            
+            if (response.data.success) {
+                console.log(`✅ Sesión WhatsApp cerrada para ${agent.nombre}`);
+                return response.data;
+            } else {
+                console.warn(`⚠️ Error cerrando sesión WhatsApp para ${agent.nombre}:`, response.data.error);
+                return null;
+            }
+            
+        } catch (error) {
+            console.error(`❌ Error conectando con módulo WhatsApp para cerrar sesión de ${agent.nombre}:`, error.message);
+            // No lanzar error para no interrumpir el proceso de desactivación
+            return null;
+        }
+    }
 
-📈 **Resumen:**
-• Propiedades nuevas: ${stats.properties.new || 0}
-• Clientes registrados: ${stats.clients.new || 0}
-• Consultas atendidas: ${stats.properties.queries || 0}
-• Visitas agendadas: ${stats.properties.visits || 0}
+    // Enviar QR code por WhatsApp al nuevo agente
+    async sendQRToAgent(agent, sessionType) {
+        try {
+            console.log(`📲 Enviando QR por WhatsApp a: ${agent.nombre} (${agent.telefono})`);
+            
+            const whatsappUrl = process.env.WHATSAPP_URL || 'http://localhost:3001';
+            const axios = require('axios');
+            
+            // Esperar un poco para que el QR esté disponible
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Obtener el QR code
+            const qrResponse = await axios.get(
+                `${whatsappUrl}/api/sessions/${sessionType}/qr`,
+                { timeout: 10000 }
+            );
+            
+            if (qrResponse.data.success && qrResponse.data.data.qr) {
+                const cargoNombre = agent.cargo_id === 2 ? 'Gerente' : 'Agente';
+                const welcomeMessage = `🎉 ¡Bienvenido/a ${agent.nombre}!
 
-🏆 **Top Propiedades:**
-${stats.properties.top?.map((p, i) => `${i + 1}. ${p.nombre} - ${p.consultas} consultas`).join('\n') || 'Sin datos'}
+Eres el nuevo ${cargoNombre} de RE/MAX y tu cuenta ha sido creada exitosamente.
 
-👥 **Actividad de Agentes:**
-${stats.users.agents?.map(a => `• ${a.nombre}: ${a.actividad} acciones`).join('\n') || 'Sin datos'}
+📱 **CONFIGURACIÓN WHATSAPP:**
+Para conectar tu sesión de WhatsApp al sistema, sigue estos pasos:
 
-¡Excelente trabajo equipo! 💪`;
+1️⃣ Abre WhatsApp Web en tu celular
+2️⃣ Escanea el código QR que aparece a continuación
+3️⃣ Tu sesión quedará conectada al sistema
 
-            return {
-                success: true,
-                date,
-                stats,
-                message,
-                templateData: {
-                    fecha: date,
-                    consultas: stats.properties.queries || 0,
-                    propiedades_mostradas: stats.properties.shown || 0,
-                    visitas: stats.properties.visits || 0,
-                    nuevos_clientes: stats.clients.new || 0,
-                    top_propiedades: stats.properties.top || [],
-                    agentes: stats.users.agents || []
+🔗 **Tu sesión:** ${sessionType}
+📞 **Tu teléfono:** ${agent.telefono}
+
+*El código QR estará disponible en el sistema. Contacta al administrador si necesitas ayuda.*`;
+
+                // Enviar mensaje via sistema (usando sesión system)
+                const sendResponse = await axios.post(
+                    `${whatsappUrl}/api/system/send`,
+                    {
+                        to: agent.telefono,
+                        message: welcomeMessage
+                    },
+                    { timeout: 15000 }
+                );
+                
+                if (sendResponse.data.success) {
+                    console.log(`✅ QR enviado exitosamente a ${agent.nombre}`);
+                } else {
+                    console.warn(`⚠️ Error enviando QR a ${agent.nombre}:`, sendResponse.data.error);
                 }
-            };
-
+                
+            } else {
+                console.warn(`⚠️ QR no disponible para ${agent.nombre}, sesión: ${sessionType}`);
+            }
+            
         } catch (error) {
-            console.error('❌ Error generando reporte diario:', error.message);
-            throw error;
+            console.error(`❌ Error enviando QR a ${agent.nombre}:`, error.message);
+            // No lanzar error - es funcionalidad adicional
         }
-    }
-
-    // Generar reporte mensual
-    async generateMonthlyReport(month, year) {
-        console.log(`📊 Generando reporte mensual: ${month}/${year}`);
-
-        try {
-            const stats = {
-                properties: await this.propertyService.getMonthlyStats(month, year),
-                clients: await this.clientService.getMonthlyStats(month, year),
-                users: await this.userService.getMonthlyStats(month, year),
-                revenue: await this.propertyService.getMonthlyRevenue(month, year)
-            };
-
-            const message = `📊 **Reporte Mensual - ${month}/${year}**
-
-📈 **Resumen del Mes:**
-• Total propiedades listadas: ${stats.properties.total || 0}
-• Propiedades vendidas/alquiladas: ${stats.properties.sold || 0}
-• Nuevos clientes: ${stats.clients.total || 0}
-• Ingresos estimados: ${stats.revenue.total || 0} Bs
-
-📊 **Métricas de Rendimiento:**
-• Tasa de conversión: ${stats.properties.conversionRate || 0}%
-• Tiempo promedio de venta: ${stats.properties.avgSaleTime || 0} días
-• Satisfacción del cliente: ${stats.clients.satisfaction || 0}/5
-
-🏆 **Agente del Mes:**
-${stats.users.topAgent ? `${stats.users.topAgent.nombre} - ${stats.users.topAgent.ventas} ventas` : 'Por determinar'}
-
-💡 **Recomendaciones:**
-${this.generateRecommendations(stats)}`;
-
-            return {
-                success: true,
-                month,
-                year,
-                stats,
-                message
-            };
-
-        } catch (error) {
-            console.error('❌ Error generando reporte mensual:', error.message);
-            throw error;
-        }
-    }
-
-    // Generar recomendaciones basadas en estadísticas
-    generateRecommendations(stats) {
-        const recommendations = [];
-
-        if (stats.properties.conversionRate < 10) {
-            recommendations.push('• Mejorar seguimiento a clientes interesados');
-        }
-        if (stats.properties.avgSaleTime > 60) {
-            recommendations.push('• Revisar estrategia de precios');
-        }
-        if (stats.clients.satisfaction < 4) {
-            recommendations.push('• Implementar programa de mejora en atención');
-        }
-
-        return recommendations.length > 0
-            ? recommendations.join('\n')
-            : '• Mantener el excelente trabajo actual';
     }
 
     // Enviar respuesta al usuario
@@ -1435,6 +2144,201 @@ ${this.generateRecommendations(stats)}`;
         }
     }
 
+    // Handler: Eliminar Propiedad (eliminación lógica)
+    async handleDeleteProperty(commandData) {
+        const params = commandData.command.parameters;
+        const propertyId = params.propertyId || params.id;
+        
+        if (!propertyId) {
+            throw new Error('ID de propiedad es requerido para eliminar');
+        }
+
+        // Buscar propiedad primero (sin filtrar estado)
+        const property = await this.propertyService.getByIdAnyStatus(propertyId);
+        if (!property) {
+            throw new Error(`Propiedad ${propertyId} no encontrada`);
+        }
+
+        if (property.estado === 0) {
+            throw new Error(`Propiedad ${propertyId} ya está eliminada`);
+        }
+
+        // Eliminar (cambiar estado a 0)
+        await this.propertyService.delete(propertyId);
+
+        return {
+            success: true,
+            action: 'property_deleted',
+            message: `🗑️ **Propiedad eliminada**\n\n📋 **INFORMACIÓN:**\n🆔 ID: ${property.id}\n🏠 Nombre: ${property.nombre_propiedad}\n📍 Ubicación: ${property.ubicacion}\n👨‍💼 Eliminada por: ${commandData.user.name}\n📅 Fecha: ${new Date().toLocaleDateString()}\n\n⚠️ La propiedad está ahora inactiva en el sistema`
+        };
+    }
+
+    // Handler: Activar Propiedad (reactivación lógica)
+    async handleActivateProperty(commandData) {
+        const params = commandData.command.parameters;
+        const propertyId = params.propertyId || params.id;
+        
+        if (!propertyId) {
+            throw new Error('ID de propiedad es requerido para activar');
+        }
+
+        // Buscar propiedad primero (sin filtrar estado)
+        const property = await this.propertyService.getByIdAnyStatus(propertyId);
+        if (!property) {
+            throw new Error(`Propiedad ${propertyId} no encontrada`);
+        }
+
+        if (property.estado === 1) {
+            throw new Error(`Propiedad ${propertyId} ya está activa`);
+        }
+
+        // Reactivar (cambiar estado a 1)
+        await this.propertyService.toggleStatus(propertyId);
+
+        return {
+            success: true,
+            action: 'property_activated',
+            message: `✅ **Propiedad reactivada**\n\n📋 **INFORMACIÓN:**\n🆔 ID: ${property.id}\n🏠 Nombre: ${property.nombre_propiedad}\n📍 Ubicación: ${property.ubicacion}\n👨‍💼 Reactivada por: ${commandData.user.name}\n📅 Fecha: ${new Date().toLocaleDateString()}\n\n🟢 La propiedad está nuevamente activa en el sistema`
+        };
+    }
+
+    // Handler: Buscar por Tipo de Operación
+    async handleSearchByOperation(commandData) {
+        const params = commandData.command.parameters;
+        const tipoOperacion = params.operationType?.toLowerCase();
+        
+        if (!tipoOperacion) {
+            throw new Error('Tipo de operación es requerido (venta/alquiler/venta o alquiler)');
+        }
+
+        // Mapear nombres a IDs (basado en dbremax.sql)
+        let tipoOperacionId;
+        if (tipoOperacion === 'venta') {
+            tipoOperacionId = 1;
+        } else if (tipoOperacion === 'alquiler') {
+            tipoOperacionId = 2;
+        } else if (tipoOperacion === 'venta o alquiler') {
+            tipoOperacionId = 3;
+        } else {
+            throw new Error('Tipo de operación inválido. Use: venta, alquiler, o "venta o alquiler"');
+        }
+
+        const properties = await this.propertyService.searchByOperationType(tipoOperacionId);
+
+        if (!properties || properties.length === 0) {
+            return {
+                success: true,
+                action: 'search_results',
+                message: `📋 **Búsqueda por operación: ${tipoOperacion.toUpperCase()}**\n\n❌ No se encontraron propiedades para esta operación`
+            };
+        }
+
+        let message = `📋 **Búsqueda por operación: ${tipoOperacion.toUpperCase()}**\n\n🏠 **${properties.length} propiedad(es) encontrada(s):**\n\n`;
+        
+        properties.slice(0, 10).forEach((prop, index) => {
+            const displayId = `${prop.id}`;
+            message += `${index + 1}. **${displayId}** - ${prop.nombre_propiedad}\n`;
+            message += `   📍 ${prop.ubicacion}\n`;
+            message += `   ${PropertyModel.formatPriceByOperationType(prop)}\n`;
+            message += `   🏗️ Tipo: ${prop.tipo_propiedad_nombre}\n`;
+            message += `   📊 Estado: ${prop.estado_propiedad_nombre}\n\n`;
+        });
+
+        if (properties.length > 10) {
+            message += `\n... y ${properties.length - 10} propiedades más`;
+        }
+
+        return {
+            success: true,
+            action: 'search_results',
+            message: message
+        };
+    }
+
+    // Handler: Buscar por Tipo de Propiedad
+    async handleSearchByPropertyType(commandData) {
+        const params = commandData.command.parameters;
+        const tipoPropiedad = params.propertyType;
+        
+        if (!tipoPropiedad) {
+            throw new Error('Tipo de propiedad es requerido (casa/departamento/terreno/oficina/local)');
+        }
+
+        const properties = await this.propertyService.searchByPropertyType(tipoPropiedad);
+
+        if (!properties || properties.length === 0) {
+            return {
+                success: true,
+                action: 'search_results',
+                message: `📋 **Búsqueda por tipo: ${tipoPropiedad.toUpperCase()}**\n\n❌ No se encontraron propiedades de este tipo`
+            };
+        }
+
+        let message = `📋 **Búsqueda por tipo: ${tipoPropiedad.toUpperCase()}**\n\n🏠 **${properties.length} propiedad(es) encontrada(s):**\n\n`;
+        
+        properties.slice(0, 10).forEach((prop, index) => {
+            const displayId = `${prop.id}`;
+            message += `${index + 1}. **${displayId}** - ${prop.nombre_propiedad}\n`;
+            message += `   📍 ${prop.ubicacion}\n`;
+            message += `   ${PropertyModel.formatPriceByOperationType(prop)}\n`;
+            message += `   🎯 Operación: ${prop.tipo_operacion_nombre}\n`;
+            message += `   📊 Estado: ${prop.estado_propiedad_nombre}\n\n`;
+        });
+
+        if (properties.length > 10) {
+            message += `\n... y ${properties.length - 10} propiedades más`;
+        }
+
+        return {
+            success: true,
+            action: 'search_results',
+            message: message
+        };
+    }
+
+    // Handler: Buscar por Estado de Propiedad
+    async handleSearchByStatus(commandData) {
+        const params = commandData.command.parameters;
+        const estadoPropiedad = params.status;
+        
+        if (!estadoPropiedad) {
+            throw new Error('Estado de propiedad es requerido (disponible/reservada/vendida/alquilada)');
+        }
+
+        const properties = await this.propertyService.searchByPropertyStatus(estadoPropiedad);
+
+        if (!properties || properties.length === 0) {
+            return {
+                success: true,
+                action: 'search_results',
+                message: `📋 **Búsqueda por estado: ${estadoPropiedad.toUpperCase()}**\n\n❌ No se encontraron propiedades con este estado`
+            };
+        }
+
+        let message = `📋 **Búsqueda por estado: ${estadoPropiedad.toUpperCase()}**\n\n🏠 **${properties.length} propiedad(es) encontrada(s):**\n\n`;
+        
+        properties.slice(0, 10).forEach((prop, index) => {
+            const displayId = `${prop.id}`;
+            message += `${index + 1}. **${displayId}** - ${prop.nombre_propiedad}\n`;
+            message += `   📍 ${prop.ubicacion}\n`;
+            message += `   ${PropertyModel.formatPriceByOperationType(prop)}\n`;
+            message += `   🏗️ Tipo: ${prop.tipo_propiedad_nombre}\n`;
+            message += `   🎯 Operación: ${prop.tipo_operacion_nombre}\n\n`;
+        });
+
+        if (properties.length > 10) {
+            message += `\n... y ${properties.length - 10} propiedades más`;
+        }
+
+        return {
+            success: true,
+            action: 'search_results',
+            message: message
+        };
+    }
+
+    // ==================== MÉTODOS AUXILIARES ====================
+    
     // Enviar respuesta de error al usuario
     async sendErrorResponse(user, errorMessage) {
         try {
@@ -1554,28 +2458,6 @@ ${this.generateRecommendations(stats)}`;
         // Cargar configuraciones o datos iniciales si es necesario
 
         console.log('✅ Procesador de comandos listo');
-    }
-
-    // Actualizar estadísticas
-    async updateStats() {
-        // Aquí podrías guardar las estadísticas en base de datos
-        console.log('📊 Actualizando estadísticas...');
-    }
-
-    // Obtener estadísticas
-    getStats() {
-        return {
-            ...this.stats,
-            commandTypes: Object.keys(this.commands).length,
-            timestamp: new Date().toISOString()
-        };
-    }
-
-    // Limpiar al cerrar
-    async shutdown() {
-        console.log('🛑 Cerrando procesador de comandos...');
-        await this.updateStats();
-        console.log('✅ Procesador de comandos cerrado');
     }
 }
 

@@ -115,14 +115,32 @@ class MessageAnalyzer {
             analysis.commandType = 'create_property';
         } else if (upperBody.includes('MODIFICAR PROPIEDAD') || upperBody.includes('ACTUALIZAR PROPIEDAD')) {
             analysis.commandType = 'update_property';
-        } else if (upperBody.includes('ELIMINAR PROPIEDAD') || upperBody.includes('BORRAR PROPIEDAD')) {
+        } else if (upperBody.includes('ELIMINAR PROPIEDAD')) {
             analysis.commandType = 'delete_property';
+        } else if (upperBody.includes('ACTIVAR PROPIEDAD')) {
+            analysis.commandType = 'activate_property';
         } else if (upperBody.includes('NUEVO CLIENTE') || upperBody.includes('REGISTRAR CLIENTE')) {
             analysis.commandType = 'create_client';
+        } else if (upperBody.includes('BAJA CLIENTE')) {
+            analysis.commandType = 'deactivate_client';
+        } else if (upperBody.includes('ALTA CLIENTE')) {
+            analysis.commandType = 'activate_client';
+        } else if (upperBody.includes('CAMBIAR CLIENTE')) {
+            analysis.commandType = 'toggle_client';
+        } else if (upperBody.includes('ELIMINAR CLIENTE')) {
+            analysis.commandType = 'delete_client';
+        } else if (upperBody.includes('REACTIVAR CLIENTE')) {
+            analysis.commandType = 'activate_client';
         } else if (upperBody.includes('REGISTRAR AGENTE') || upperBody.includes('NUEVO AGENTE')) {
             analysis.commandType = 'create_agent';
         } else if (upperBody.includes('LISTAR') || upperBody.includes('MOSTRAR')) {
             analysis.commandType = 'list_data';
+        } else if (upperBody.includes('BUSCAR OPERACION')) {
+            analysis.commandType = 'search_by_operation';
+        } else if (upperBody.includes('BUSCAR TIPO')) {
+            analysis.commandType = 'search_by_property_type';
+        } else if (upperBody.includes('BUSCAR ESTADO')) {
+            analysis.commandType = 'search_by_status';
         } else if (upperBody.includes('AYUDA') || upperBody.includes('HELP')) {
             analysis.commandType = 'help';
         }

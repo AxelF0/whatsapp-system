@@ -4,7 +4,7 @@ from app.config import Base, engine
 from app.api import chat_router, debug_router
 
 app = FastAPI(
-    title="Sistema Inteligente Remax Express",
+    title="Asistente Virtual Mawell",
     description="Backend FastAPI para chatbot IA con integración a PDF",
     version="1.0.0",
 )
@@ -23,7 +23,7 @@ Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def read_root():
-    return {"message": "API Remax Express IA activa 🚀"}
+    return {"message": "API Mawell IA activa 🚀"}
 
 
 app.include_router(chat_router)

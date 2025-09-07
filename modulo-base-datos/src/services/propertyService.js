@@ -186,6 +186,66 @@ class PropertyService {
         }
     }
 
+    // Obtener propiedad por ID (cualquier estado)
+    async getByIdAnyStatus(propertyId) {
+        console.log('🔍 Buscando propiedad (cualquier estado):', propertyId);
+    
+        try {
+            // Convertir ID si es necesario
+            let id = propertyId;
+            
+            if (typeof propertyId === 'string' && propertyId.startsWith('PROP')) {
+                id = parseInt(propertyId.replace('PROP', ''));
+                if (isNaN(id)) {
+                    console.log('⚠️ ID inválido:', propertyId);
+                    return null;
+                }
+            } else if (typeof propertyId === 'string') {
+                id = parseInt(propertyId);
+                if (isNaN(id)) {
+                    console.log('⚠️ ID no numérico:', propertyId);
+                    return null;
+                }
+            }
+    
+            // Buscar en base de datos sin filtrar por estado
+            const property = await this.model.findByIdAnyStatus(id);
+            return property;
+    
+        } catch (error) {
+            console.error('❌ Error obteniendo propiedad (cualquier estado):', error.message);
+            return null;
+        }
+    }
+
+    // Cambiar estado de propiedad (toggle)
+    async toggleStatus(propertyId) {
+        console.log('🔄 Cambiando estado de propiedad:', propertyId);
+    
+        try {
+            // Convertir ID si es necesario
+            let id = propertyId;
+            if (typeof propertyId === 'string' && propertyId.startsWith('PROP')) {
+                id = parseInt(propertyId.replace('PROP', ''));
+            } else if (typeof propertyId === 'string') {
+                id = parseInt(propertyId);
+            }
+    
+            // Cambiar estado usando el modelo
+            const updatedProperty = await this.model.toggleStatus(id);
+            
+            // Limpiar cache
+            this.clearCache();
+            
+            console.log('✅ Estado de propiedad cambiado');
+            return updatedProperty;
+    
+        } catch (error) {
+            console.error('❌ Error cambiando estado de propiedad:', error.message);
+            throw error;
+        }
+    }
+
     // Listar todas las propiedades
     async list(filters = {}) {
         console.log('📋 Listando propiedades');
@@ -401,6 +461,42 @@ class PropertyService {
         return Math.round(total / properties.length);
     }
 
+    // Buscar propiedades por tipo de operación
+    async searchByOperationType(tipoOperacionId) {
+        console.log('🔍 Buscando propiedades por tipo de operación:', tipoOperacionId);
+
+        try {
+            return await this.model.findByOperationType(tipoOperacionId);
+        } catch (error) {
+            console.error('❌ Error buscando propiedades por tipo operación:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar propiedades por tipo de propiedad
+    async searchByPropertyType(tipoPropiedad) {
+        console.log('🔍 Buscando propiedades por tipo de propiedad:', tipoPropiedad);
+
+        try {
+            return await this.model.findByPropertyType(tipoPropiedad);
+        } catch (error) {
+            console.error('❌ Error buscando propiedades por tipo propiedad:', error.message);
+            return [];
+        }
+    }
+
+    // Buscar propiedades por estado de propiedad
+    async searchByPropertyStatus(estadoPropiedad) {
+        console.log('🔍 Buscando propiedades por estado:', estadoPropiedad);
+
+        try {
+            return await this.model.findByPropertyStatus(estadoPropiedad);
+        } catch (error) {
+            console.error('❌ Error buscando propiedades por estado:', error.message);
+            return [];
+        }
+    }
+
     // Buscar propiedades con filtros (función general)
     async searchProperties(filters = {}) {
         console.log('🔍 Búsqueda general de propiedades:', filters);
@@ -432,6 +528,17 @@ class PropertyService {
                 return await this.model.findByUserId(filters.usuario_id);
             }
 
+            // Si solo hay tipo_operacion_id, usar búsqueda específica
+            if (filters.tipo_operacion_id && Object.keys(filters).length === 1) {
+                return await this.model.findByOperationType(filters.tipo_operacion_id);
+            }
+
+            // Si hay filtro de estado (para propiedades eliminadas/activas)
+            if (filters.estado !== undefined) {
+                console.log(`🔍 FILTRO ESTADO DETECTADO: ${filters.estado}`);
+                return await this.model.findByMultipleFilters(filters);
+            }
+
             // Para filtros múltiples, usar búsqueda personalizada
             return await this.model.findByMultipleFilters(filters);
 
@@ -450,6 +557,10 @@ class PropertyService {
     // Alias methods for compatibility with routes
     async getPropertyById(propertyId) {
         return await this.getById(propertyId);
+    }
+
+    async getPropertyByIdAnyStatus(propertyId) {
+        return await this.getByIdAnyStatus(propertyId);
     }
 
     async createProperty(propertyData) {

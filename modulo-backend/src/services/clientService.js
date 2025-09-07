@@ -265,6 +265,76 @@ class ClientService {
         }
     }
 
+    // Buscar cliente por ID o teléfono (cualquier estado)
+    async findClientByIdOrPhone(identifier) {
+        console.log('🔍 Buscando cliente por ID o teléfono:', identifier);
+
+        try {
+            const response = await axios.get(
+                `${this.databaseUrl}/api/clients/find/${encodeURIComponent(identifier)}`,
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                return null;
+            }
+
+        } catch (error) {
+            if (error.response?.status === 404) {
+                return null;
+            }
+            console.error('❌ Error buscando cliente:', error.message);
+            throw error;
+        }
+    }
+
+    // Listar clientes inactivos
+    async listInactive() {
+        console.log('📋 Listando clientes eliminados');
+
+        try {
+            const response = await axios.get(
+                `${this.databaseUrl}/api/clients/inactive`,
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                return [];
+            }
+
+        } catch (error) {
+            console.error('❌ Error listando clientes eliminados:', error.message);
+            return [];
+        }
+    }
+
+    // Actualizar estado de cliente
+    async updateClientStatus(clientId, status) {
+        console.log('🔄 Actualizando estado de cliente:', clientId, 'a:', status);
+
+        try {
+            const response = await axios.put(
+                `${this.databaseUrl}/api/clients/${clientId}/status`,
+                { estado: status },
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                throw new Error(response.data.error || 'Error actualizando estado');
+            }
+
+        } catch (error) {
+            console.error('❌ Error actualizando estado:', error.message);
+            throw error;
+        }
+    }
+
     // Obtener estadísticas generales
     async getStats() {
         try {

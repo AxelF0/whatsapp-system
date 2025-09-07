@@ -179,10 +179,11 @@ class MessageProcessor {
 
     // Enviar datos al módulo de procesamiento
     async sendToGateway(messageData, messageType, attempt = 1) {
+        // Definir endpoint y URL fuera del try para que estén disponibles en catch
+        const endpoint = '/api/process/message';
+        const processingUrl = this.processingUrl || 'http://localhost:3002';
+        
         try {
-            // Enviar todo al endpoint de procesamiento de mensajes
-            const endpoint = '/api/process/message';
-            const processingUrl = this.processingUrl || 'http://localhost:3002';
 
             console.log(`📡 ENVIANDO AL MÓDULO DE PROCESAMIENTO:`);
             console.log(`   🌐 URL: ${processingUrl}${endpoint}`);

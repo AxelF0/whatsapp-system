@@ -53,7 +53,7 @@ def llm_freeform(prompt: str) -> str:
     Plain LLM call without RAG for small talk / UX niceties.
     Keep it short and helpful.
     """
-    sys = "Eres un asistente en español, cordial, breve y claro."
+    sys = "Soy el asistente de Remaxi, inmobiliaria en español especializada en venta y alquiler de propiedades, cordial y breve."
     final = f"{sys}\n\nInstrucción del usuario: {prompt}\nRespuesta:"
     try:
         resp = requests.post(
@@ -62,10 +62,10 @@ def llm_freeform(prompt: str) -> str:
             timeout=60,
         )
         if resp.status_code != 200:
-            return "¡Hola! ¿En qué puedo ayudarte hoy?"
-        return resp.json().get("response", "").strip() or "¡Hola! ¿En qué puedo ayudarte hoy?"
+            return "¡Hola! Soy el asistente de Remaxi, inmobiliaria de venta y alquiler. ¿En qué propiedad puedo ayudarte?"
+        return resp.json().get("response", "").strip() or "¡Hola! Soy el asistente de Remaxi, inmobiliaria de venta y alquiler. ¿En qué propiedad puedo ayudarte?"
     except requests.RequestException:
-        return "¡Hola! ¿En qué puedo ayudarte hoy?"
+        return "¡Hola! Soy el asistente de Remaxi, inmobiliaria de venta y alquiler. ¿En qué propiedad puedo ayudarte?"
 
 # --- Routes -----------------------------------------------------------
 
@@ -110,10 +110,9 @@ def send_question(data: ChatRequest, db: Session = Depends(get_db)):
         titles = get_suggested_titles(user_text, max_suggestions=4)
         topics_line = format_topics_inline(titles, max_items=4)
         prompt = (
-            "Saluda cordialmente en una sola frase y ofrece ayuda de manera breve. "
+            "Saluda cordialmente como asistente de Remaxi, inmobiliaria de venta y alquiler, en una sola frase y ofrece ayuda con propiedades de manera breve. "
             "No menciones detalles técnicos. "
-            # + (f"Si encaja natural, sugiere continuar con: {topics_line}. " if topics_line else "")
-            # + "Termina con una pregunta corta para invitar a elegir un tema."
+            "Pregunta específicamente sobre qué propiedad en venta o alquiler puedes ayudar."
         )
         answer = llm_freeform(prompt)
 
@@ -122,10 +121,10 @@ def send_question(data: ChatRequest, db: Session = Depends(get_db)):
         titles = get_suggested_titles(user_text, max_suggestions=5)
         topics_line = format_topics_inline(titles, max_items=5)
         prompt = (
-            "Responde en tono cordial y claro, sin tecnicismos. "
-            "Di en una frase que puedes ayudar con explicaciones, resúmenes, definiciones y comparaciones. "
+            "Responde como asistente de Remaxi, inmobiliaria de venta y alquiler, en tono cordial y claro, sin tecnicismos. "
+            "Di en una frase que puedes ayudar con información sobre propiedades, precios, ubicaciones y comparaciones de propiedades en venta y alquiler. "
             + (f"Luego sugiere continuar por temas como: {topics_line}. " if topics_line else "")
-            + "Cierra con: ‘¿Sobre cuál te gustaría saber más?’"
+            + "Cierra con: '¿Sobre qué propiedad en venta o alquiler te gustaría saber más?'"
         )
         answer = llm_freeform(prompt)
 
@@ -138,14 +137,14 @@ def send_question(data: ChatRequest, db: Session = Depends(get_db)):
             titles = info.get("titles", [])
             if not titles:
                 answer = (
-                    f"No tengo información disponible sobre “{pdf_name}” por ahora. "
-                    "Indícame otro tema o sección y lo revisamos."
+                    f"No tengo información disponible sobre propiedades en “{pdf_name}” por ahora. "
+                    "Pregúntame sobre otra ubicación, tipo de propiedad en venta o alquiler."
                 )
             else:
                 bullets = "\n".join(f"• {t['title']}" for t in titles[:8] if t.get("title"))
                 answer = (
-                    f"En “{pdf_name}” encontrarás temas como:\n{bullets}\n\n"
-                    "Si te interesa alguno, dime y lo exploramos."
+                    f"En “{pdf_name}”  encontrarás información sobre propiedades:\n{bullets}\n\n"
+                    "Si te interesa alguna propiedad en venta o alquiler, dime y lo exploramos."
                 )
         else:
             # RAG normal
@@ -157,10 +156,10 @@ def send_question(data: ChatRequest, db: Session = Depends(get_db)):
                 titles = get_suggested_titles(user_text, max_suggestions=5)
                 topics_line = format_topics_inline(titles, max_items=5)
                 prompt = (
-                    "Responde en tono natural y breve, sin explicar tu funcionamiento. "
-                    "Invita a seguir con temas relacionados de los documentos. "
-                    + (f"Propón continuar con: {topics_line}. " if topics_line else "")
-                    + "Termina con una pregunta corta para que el usuario elija un tema."
+                    "Responde como asistente de Remaxi en tono natural y breve, sin explicar tu funcionamiento. "
+                    "Invita a seguir con propiedades relacionadas de los documentos. "
+                    + (f"Propón continuar con propiedades como: {topics_line}. " if topics_line else "")
+                    + "Termina con una pregunta corta sobre qué propiedad en venta o alquiler le interesa."
                 )
                 answer = llm_freeform(prompt)
 

@@ -46,8 +46,6 @@ class PropertyService {
             if (response.data.success) {
                 const property = response.data.data;
                 
-                // Limpiar cache
-                this.clearCache();
                 
                 console.log('✅ Propiedad creada:', property.id);
                 return property;
@@ -91,8 +89,6 @@ class PropertyService {
             );
 
             if (response.data.success) {
-                // Limpiar cache
-                this.clearCache();
                 
                 console.log('✅ Propiedad actualizada');
                 return response.data.data;
@@ -121,7 +117,7 @@ class PropertyService {
                 }
             }
     
-            // Verificar que existe
+            // Verificar que existe (buscar en cualquier estado para eliminar)
             const existing = await this.getById(id);
             if (!existing) {
                 throw new Error(`Propiedad ${propertyId} no encontrada`);
@@ -134,8 +130,6 @@ class PropertyService {
             );
     
             if (response.data.success) {
-                // Limpiar cache
-                this.clearCache();
                 
                 console.log('✅ Propiedad eliminada');
                 return true;
@@ -207,6 +201,49 @@ class PropertyService {
                 return null;
             }
             console.error('❌ Error obteniendo propiedad:', error.message);
+            throw error;
+        }
+    }
+
+    // Obtener propiedad por ID (cualquier estado)
+    async getByIdAnyStatus(propertyId) {
+        console.log('🔍 Buscando propiedad (cualquier estado):', propertyId);
+
+        try {
+            // Convertir ID si es necesario
+            let id = propertyId;
+            
+            if (typeof propertyId === 'string' && propertyId.startsWith('PROP')) {
+                id = parseInt(propertyId.replace('PROP', ''));
+                if (isNaN(id)) {
+                    console.log('⚠️ ID inválido:', propertyId);
+                    return null;
+                }
+            } else if (typeof propertyId === 'string') {
+                id = parseInt(propertyId);
+                if (isNaN(id)) {
+                    console.log('⚠️ ID no numérico:', propertyId);
+                    return null;
+                }
+            }
+
+            // Buscar en base de datos sin filtrar por estado
+            const response = await axios.get(
+                `${this.databaseUrl}/api/properties/${id}/any-status`,
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                return null;
+            }
+
+        } catch (error) {
+            if (error.response?.status === 404) {
+                return null;
+            }
+            console.error('❌ Error obteniendo propiedad (cualquier estado):', error.message);
             throw error;
         }
     }
@@ -343,95 +380,59 @@ class PropertyService {
         }
     }
 
-    // Obtener top propiedades más consultadas
-    async getTopProperties(limit = 10) {
-        console.log('🏆 Obteniendo top propiedades');
-
-        try {
-            // Por ahora retornar las más recientes
-            // En producción, esto debería basarse en métricas reales
-            const properties = await this.list();
-            return properties.slice(0, limit);
-
-        } catch (error) {
-            console.error('❌ Error obteniendo top propiedades:', error.message);
-            return [];
-        }
+    // Buscar propiedades por tipo de operación
+    async searchByOperationType(tipoOperacionId) {
+        console.log('🔍 Buscando propiedades por tipo de operación:', tipoOperacionId);
+        return await this.search({ tipo_operacion_id: tipoOperacionId });
     }
 
-    // Obtener estadísticas diarias
-    async getDailyStats(date) {
-        console.log('📊 Obteniendo estadísticas diarias:', date);
-
-        try {
-            // Simulación de estadísticas
-            // En producción, esto vendría de la base de datos
-            return {
-                new: Math.floor(Math.random() * 5),
-                queries: Math.floor(Math.random() * 20),
-                visits: Math.floor(Math.random() * 10),
-                shown: Math.floor(Math.random() * 30),
-                top: await this.getTopProperties(3)
-            };
-
-        } catch (error) {
-            console.error('❌ Error obteniendo estadísticas:', error.message);
-            return {};
-        }
+    // Buscar propiedades por tipo de propiedad  
+    async searchByPropertyType(tipoPropiedad) {
+        console.log('🔍 Buscando propiedades por tipo:', tipoPropiedad);
+        return await this.search({ tipo_propiedad: tipoPropiedad });
     }
 
-    // Obtener estadísticas mensuales
-    async getMonthlyStats(month, year) {
-        console.log(`📊 Obteniendo estadísticas mensuales: ${month}/${year}`);
-
-        try {
-            // Simulación de estadísticas
-            return {
-                total: Math.floor(Math.random() * 50) + 10,
-                sold: Math.floor(Math.random() * 10),
-                conversionRate: Math.floor(Math.random() * 30) + 5,
-                avgSaleTime: Math.floor(Math.random() * 60) + 15
-            };
-
-        } catch (error) {
-            console.error('❌ Error obteniendo estadísticas mensuales:', error.message);
-            return {};
-        }
+    // Buscar propiedades por estado de propiedad
+    async searchByPropertyStatus(estadoPropiedad) {
+        console.log('🔍 Buscando propiedades por estado:', estadoPropiedad);
+        return await this.search({ estado_propiedad: estadoPropiedad });
     }
 
-    // Obtener ingresos mensuales
-    async getMonthlyRevenue(month, year) {
-        console.log(`💰 Calculando ingresos: ${month}/${year}`);
+    // Cambiar estado de propiedad (toggle)
+    async toggleStatus(propertyId) {
+        console.log('🔄 Cambiando estado de propiedad:', propertyId);
 
         try {
-            // Simulación de ingresos
-            return {
-                total: Math.floor(Math.random() * 1000000) + 100000,
-                commission: Math.floor(Math.random() * 50000) + 5000
-            };
+            // Convertir ID si es necesario
+            let id = propertyId;
+            if (typeof propertyId === 'string' && propertyId.startsWith('PROP')) {
+                id = parseInt(propertyId.replace('PROP', ''));
+                if (isNaN(id)) {
+                    throw new Error(`ID de propiedad inválido: ${propertyId}`);
+                }
+            } else if (typeof propertyId === 'string') {
+                id = parseInt(propertyId);
+                if (isNaN(id)) {
+                    throw new Error(`ID de propiedad inválido: ${propertyId}`);
+                }
+            }
+
+            // Cambiar estado usando el endpoint de la base de datos
+            const response = await axios.put(
+                `${this.databaseUrl}/api/properties/${id}/toggle-status`,
+                {},
+                { timeout: 10000 }
+            );
+
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                throw new Error(response.data.error || 'Error cambiando estado de propiedad');
+            }
 
         } catch (error) {
-            console.error('❌ Error calculando ingresos:', error.message);
-            return { total: 0, commission: 0 };
-        }
-    }
-
-    // Obtener estadísticas generales
-    async getStats() {
-        try {
-            const properties = await this.list();
-            
-            return {
-                total: properties.length,
-                active: properties.filter(p => p.estado === 1).length,
-                inactive: properties.filter(p => p.estado === 0).length,
-                byType: this.groupByType(properties),
-                avgPrice: this.calculateAvgPrice(properties)
-            };
-
-        } catch (error) {
-            console.error('❌ Error obteniendo estadísticas:', error.message);
-            return {};
+            console.error('❌ Error cambiando estado de propiedad:', error.message);
+            throw error;
         }
     }
 
@@ -445,20 +446,6 @@ class PropertyService {
         });
         
         return groups;
-    }
-
-    // Calcular precio promedio
-    calculateAvgPrice(properties) {
-        if (properties.length === 0) return 0;
-        
-        const total = properties.reduce((sum, p) => sum + (p.precio || 0), 0);
-        return Math.round(total / properties.length);
-    }
-
-    // Limpiar cache
-    clearCache() {
-        this.cache.clear();
-        console.log('🗑️ Cache de propiedades limpiado');
     }
 }
 

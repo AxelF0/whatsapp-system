@@ -82,6 +82,98 @@ app.get('/api/users/validate/:phone', async (req, res) => {
     }
 });
 
+// Endpoint para buscar usuario por teléfono sin filtrar por estado (para baja/alta)
+app.get('/api/users/find-any-status/:phone', async (req, res) => {
+    try {
+        const phone = req.params.phone;
+        console.log(`🔍 Buscando usuario por teléfono sin filtrar estado: ${phone}`);
+        
+        const user = await userService.findUserByPhoneAnyStatus(phone);
+        console.log(`📊 Resultado búsqueda teléfono ${phone}:`, user ? `Encontrado: ${user.nombre}` : 'No encontrado');
+        
+        if (user) {
+            res.json({
+                success: true,
+                data: user
+            });
+        } else {
+            res.json({
+                success: false,
+                data: null,
+                error: 'Usuario no encontrado'
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error buscando usuario por teléfono:', error);
+        res.status(500).json({ 
+            error: error.message,
+            success: false
+        });
+    }
+});
+
+// Endpoint para buscar usuario por ID sin filtrar por estado (para baja/alta)
+app.get('/api/users/find-any-status-by-id/:id', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        console.log(`🔍 Buscando usuario por ID sin filtrar estado: ${userId}`);
+        
+        if (isNaN(userId)) {
+            return res.status(400).json({
+                success: false,
+                error: 'ID de usuario inválido'
+            });
+        }
+        
+        const user = await userService.findUserByIdAnyStatus(userId);
+        console.log(`📊 Resultado búsqueda ID ${userId}:`, user ? `Encontrado: ${user.nombre}` : 'No encontrado');
+        
+        if (user) {
+            res.json({
+                success: true,
+                data: user
+            });
+        } else {
+            res.json({
+                success: false,
+                data: null,
+                error: 'Usuario no encontrado'
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error buscando usuario por ID:', error);
+        res.status(500).json({ 
+            error: error.message,
+            success: false
+        });
+    }
+});
+
+// Endpoint para listar usuarios por estado (activos/inactivos)
+app.get('/api/users/by-status/:status', async (req, res) => {
+    try {
+        const status = parseInt(req.params.status);
+        if (status !== 0 && status !== 1) {
+            return res.status(400).json({
+                success: false,
+                error: 'Estado debe ser 0 (inactivo) o 1 (activo)'
+            });
+        }
+        
+        const users = await userService.getUsersByStatus(status);
+        res.json({
+            success: true,
+            data: users
+        });
+    } catch (error) {
+        console.error('Error listando usuarios por estado:', error);
+        res.status(500).json({ 
+            error: error.message,
+            success: false
+        });
+    }
+});
+
 // Obtener usuario por ID
 app.get('/api/users/:id', async (req, res) => {
     try {
@@ -174,6 +266,30 @@ app.put('/api/clients/:id', async (req, res) => {
     }
 });
 
+// Obtener clientes inactivos/eliminados
+app.get('/api/clients/inactive', async (req, res) => {
+    try {
+        const clients = await clientService.getInactiveClients();
+        res.json({ success: true, data: clients });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Actualizar estado de cliente
+app.put('/api/clients/:id/status', async (req, res) => {
+    try {
+        const client = await clientService.updateClientStatus(req.params.id, req.body.estado);
+        if (client) {
+            res.json({ success: true, data: client });
+        } else {
+            res.status(404).json({ success: false, error: 'Cliente no encontrado' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Rutas para Propiedades
 app.get('/api/properties', async (req, res) => {
     try {
@@ -217,6 +333,20 @@ app.get('/api/properties/:id', async (req, res) => {
     }
 });
 
+// Obtener propiedad por ID (cualquier estado)
+app.get('/api/properties/:id/any-status', async (req, res) => {
+    try {
+        const property = await propertyService.getPropertyByIdAnyStatus(req.params.id);
+        if (property) {
+            res.json({ success: true, data: property });
+        } else {
+            res.status(404).json({ success: false, error: 'Propiedad no encontrada' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.post('/api/properties', async (req, res) => {
     try {
         const property = await propertyService.createProperty(req.body);
@@ -249,6 +379,17 @@ app.delete('/api/properties/:id', async (req, res) => {
         res.json({ success: true, data: deleted });
     } catch (error) {
         const status = error.message === 'Propiedad no encontrada' ? 404 : 400;
+        res.status(status).json({ success: false, error: error.message });
+    }
+});
+
+// Cambiar estado de propiedad (toggle)
+app.put('/api/properties/:id/toggle-status', async (req, res) => {
+    try {
+        const property = await propertyService.toggleStatus(parseInt(req.params.id, 10));
+        res.json({ success: true, data: property });
+    } catch (error) {
+        const status = error.message.includes('no encontrada') ? 404 : 400;
         res.status(status).json({ success: false, error: error.message });
     }
 });

@@ -14,6 +14,10 @@ class MultiSessionManager {
         // Control de mensajes para evitar duplicados
         this.messageCache = new Map(); // messageId -> timestamp
         
+        // 🆕 Cache de QR con timestamps para evitar spam
+        this.qrTimestamps = new Map(); // sessionType -> timestamp
+        this.qrCacheDuration = 1 * 60 * 1000; // 1 minuto (duración corta)
+        
         // Usar directorio por defecto de whatsapp-web.js (no crear carpeta custom)
         // Esto permite que whatsapp-web.js maneje las sesiones automáticamente
         
@@ -25,6 +29,8 @@ class MultiSessionManager {
         
         // Limpiar cache cada 5 minutos
         setInterval(() => this.cleanMessageCache(), 5 * 60 * 1000);
+        // 🆕 Limpiar cache de QR cada 2 minutos
+        setInterval(() => this.cleanQRCache(), 2 * 60 * 1000);
     }
 
     // Ya no necesitamos crear directorio personalizado
@@ -65,9 +71,9 @@ class MultiSessionManager {
         }
     }
 
-    // Crear una sesión individual
-    async createSession(sessionType, phone, name) {
-        console.log(`📱 Creando sesión ${sessionType.toUpperCase()}: ${name} (${phone})`);
+    // Cargar una sesión existente (solo si ya tiene datos de autenticación)
+    async loadExistingSession(sessionType, phone, name) {
+        console.log(`🔄 Cargando sesión existente: ${sessionType.toUpperCase()}: ${name} (${phone})`);
 
         if (this.sessions.has(sessionType)) {
             const existingSession = this.sessions.get(sessionType);
@@ -80,16 +86,117 @@ class MultiSessionManager {
                     phone: existingSession.phone,
                     name: existingSession.name,
                     status: existingSession.status,
-                    clientId: existingSession.clientId
+                    clientId: existingSession.clientId,
+                    loaded: true
                 };
             }
             
-            console.log(`⚠️ Sesión ${sessionType} existe pero no está ready (${existingSession.status}), recreando...`);
+            console.log(`⚠️ Sesión ${sessionType} existe pero no está ready (${existingSession.status}), recargando...`);
             await this.closeSession(sessionType);
         }
 
-        // Configuración del cliente WhatsApp
-        const clientId = `${sessionType}_${phone.replace(/[^\d]/g, '')}`;
+        // sessionType puede ser número (59169173077) o 'system'
+        let clientId;
+        
+        if (sessionType === 'system') {
+            // Para el sistema, usar formato tradicional
+            clientId = `system_${phone.replace(/[^\d]/g, '')}`;
+        } else {
+            // Para usuarios, usar solo el número
+            clientId = sessionType;
+        }
+        
+        const client = new Client({
+            authStrategy: new LocalAuth({
+                clientId: clientId
+            }),
+            puppeteer: {
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-extensions',
+                    '--disable-dev-shm-usage',
+                    '--no-first-run'
+                ]
+            }
+        });
+
+        // Crear datos de la sesión
+        const sessionData = {
+            type: sessionType,
+            phone: phone,
+            name: name,
+            client: client,
+            status: 'loading_existing',
+            createdAt: new Date(),
+            lastActivity: new Date(),
+            messagesReceived: 0,
+            messagesSent: 0,
+            clientId: clientId
+        };
+
+        this.sessions.set(sessionType, sessionData);
+
+        // Configurar eventos del cliente (SIN mostrar QR - solo para reconexión)
+        this.setupClientEventsForExisting(client, sessionType, name);
+
+        // Inicializar cliente
+        try {
+            await client.initialize();
+            console.log(`✅ Sesión existente ${sessionType.toUpperCase()} inicializada`);
+            
+            return {
+                sessionType,
+                phone,
+                name,
+                status: sessionData.status,
+                clientId,
+                loaded: true
+            };
+
+        } catch (error) {
+            console.error(`❌ Error cargando sesión existente ${sessionType}:`, error.message);
+            this.sessions.delete(sessionType);
+            throw error;
+        }
+    }
+
+    // Crear una sesión individual
+    async createSession(sessionType, phone, name, silent = false) {
+        const logPrefix = silent ? '🔇' : '📱';
+        console.log(`${logPrefix} Creando sesión ${sessionType.toUpperCase()}: ${name} (${phone}) ${silent ? '(modo silencioso)' : ''}`);
+
+        if (this.sessions.has(sessionType)) {
+            const existingSession = this.sessions.get(sessionType);
+            
+            // Si la sesión existe y está funcionando, no la recrear
+            if (existingSession.status === 'ready') {
+                if (!silent) console.log(`✅ Sesión ${sessionType} ya está activa y funcionando`);
+                return {
+                    sessionType,
+                    phone: existingSession.phone,
+                    name: existingSession.name,
+                    status: existingSession.status,
+                    clientId: existingSession.clientId,
+                    silent: silent
+                };
+            }
+            
+            if (!silent) console.log(`⚠️ Sesión ${sessionType} existe pero no está ready (${existingSession.status}), recreando...`);
+            await this.closeSession(sessionType);
+        }
+
+        // sessionType puede ser número (59169173077) o 'system'
+        let clientId;
+        
+        if (sessionType === 'system') {
+            // Para el sistema, usar formato tradicional
+            clientId = `system_${phone.replace(/[^\d]/g, '')}`;
+        } else {
+            // Para usuarios, usar solo el número
+            clientId = sessionType;
+        }
         
         const client = new Client({
             authStrategy: new LocalAuth({
@@ -125,19 +232,20 @@ class MultiSessionManager {
         this.sessions.set(sessionType, sessionData);
 
         // Configurar eventos del cliente
-        this.setupClientEvents(client, sessionType, name);
+        this.setupClientEvents(client, sessionType, name, silent);
 
         // Inicializar cliente
         try {
             await client.initialize();
-            console.log(`✅ Cliente ${sessionType.toUpperCase()} inicializado`);
+            if (!silent) console.log(`✅ Cliente ${sessionType.toUpperCase()} inicializado`);
             
             return {
                 sessionType,
                 phone,
                 name,
                 status: sessionData.status,
-                clientId
+                clientId,
+                silent: silent
             };
 
         } catch (error) {
@@ -147,26 +255,109 @@ class MultiSessionManager {
         }
     }
 
+    // Configurar eventos para sesiones existentes (SIN QR)
+    setupClientEventsForExisting(client, sessionType, name) {
+        const sessionData = this.sessions.get(sessionType);
+        const sessionIcon = sessionType === 'agent' ? '👤' : sessionType === 'system' ? '🖥️' : '👨‍💼';
+
+        console.log(`🔧 Configurando eventos para sesión existente: ${sessionType.toUpperCase()}`);
+
+        // NO manejamos evento 'qr' para sesiones existentes - si necesita QR significa que no es una sesión válida existente
+        client.on('qr', () => {
+            console.log(`⚠️ ${sessionIcon} Sesión ${sessionType.toUpperCase()} requiere QR - no es una sesión existente válida`);
+            sessionData.status = 'requires_qr';
+            // No mostrar QR - esta sesión debería eliminarse y crearse nueva cuando sea necesario
+        });
+
+        // Cliente listo
+        client.on('ready', async () => {
+            console.log(`✅ ${sessionIcon} ${sessionType.toUpperCase()} RECONECTADO: ${name}`);
+            
+            sessionData.status = 'ready';
+            sessionData.connectedAt = new Date();
+            
+            // Verificar estado real
+            try {
+                const info = await client.getState();
+                console.log(`📱 ${sessionIcon} Estado del cliente: ${info}`);
+                
+                const contacts = await client.getContacts();
+                console.log(`👥 ${sessionIcon} Contactos cargados: ${contacts.length}`);
+                
+            } catch (error) {
+                console.error(`❌ ${sessionIcon} ERROR verificando estado:`, error.message);
+            }
+        });
+
+        // Cliente autenticado
+        client.on('authenticated', () => {
+            console.log(`🔐 ${sessionIcon} ${sessionType.toUpperCase()} autenticado correctamente`);
+            sessionData.status = 'authenticated';
+        });
+
+        // Desconexión
+        client.on('disconnected', (reason) => {
+            console.log(`❌ ${sessionIcon} ${sessionType.toUpperCase()} desconectado:`, reason);
+            sessionData.status = 'disconnected';
+        });
+
+        // Recibir mensajes
+        client.on('message', async (message) => {
+            await this.handleIncomingMessage(message, sessionType, sessionData);
+        });
+
+        // Errores de autenticación
+        client.on('auth_failure', () => {
+            console.log(`❌ ${sessionIcon} ${sessionType.toUpperCase()} fallo de autenticación`);
+            sessionData.status = 'auth_failed';
+        });
+
+        // Cambios de estado
+        client.on('change_state', (state) => {
+            console.log(`🔄 ${sessionIcon} ${sessionType.toUpperCase()} cambio de estado:`, state);
+        });
+    }
+
     // Configurar eventos del cliente WhatsApp
-    setupClientEvents(client, sessionType, name) {
+    setupClientEvents(client, sessionType, name, silent = false) {
         const sessionData = this.sessions.get(sessionType);
         const sessionIcon = sessionType === 'agent' ? '👤' : '🖥️';
 
-        console.log(`🔧 Configurando eventos para ${sessionType.toUpperCase()}`);
-        console.log(`📋 Cliente inicializado: ${!!client}`);
-        console.log(`📋 SessionData: ${!!sessionData}`);
+        if (!silent) {
+            console.log(`🔧 Configurando eventos para ${sessionType.toUpperCase()}`);
+            console.log(`📋 Cliente inicializado: ${!!client}`);
+            console.log(`📋 SessionData: ${!!sessionData}`);
+        }
 
         // QR Code para conexión
         client.on('qr', (qr) => {
-            console.log(`\n${sessionIcon} QR generado para ${sessionType.toUpperCase()} (${name}):`);
-            qrcode.generate(qr, { small: true });
-            console.log(`📱 Escanea este código QR con el teléfono: ${sessionData.phone}`);
-            console.log('────────────────────────────────────────');
+            const now = Date.now();
+            const lastQRTime = this.qrTimestamps.get(sessionType);
+            
+            // 🆕 CONTROL DE SPAM: Solo mostrar/procesar QR si ha pasado suficiente tiempo
+            if (lastQRTime && (now - lastQRTime) < 60000) { // 1 minuto mínimo entre QRs
+                console.log(`🔇 QR regenerado para ${sessionType.toUpperCase()} (${name}) - suprimido por rate limiting (${Math.round((now - lastQRTime)/1000)}s desde el último)`);
+                return; // No procesar QR duplicado
+            }
+            
+            // Registrar timestamp del QR
+            this.qrTimestamps.set(sessionType, now);
+            
+            if (!silent) {
+                console.log(`\n${sessionIcon} QR generado para ${sessionType.toUpperCase()} (${name}):`);
+                qrcode.generate(qr, { small: true });
+                console.log(`📱 Escanea este código QR con el teléfono: ${sessionData.phone}`);
+                console.log(`⏰ QR válido por ~1 minuto - escanea rápido`);
+                console.log('────────────────────────────────────────');
+            } else {
+                console.log(`🔇 QR generado para ${sessionType.toUpperCase()} (modo silencioso) - ${now}`);
+            }
             
             // Guardar QR para consulta posterior
             this.qrCodes.set(sessionType, qr);
             sessionData.status = 'waiting_qr';
             sessionData.qrCode = qr;
+            sessionData.qrGeneratedAt = now;
         });
 
         // Cliente listo
@@ -486,6 +677,18 @@ class MultiSessionManager {
         console.log(`🧹 Cache limpiado: ${this.messageCache.size} mensajes en cache`);
     }
 
+    // 🆕 Limpiar cache de QR antiguos
+    cleanQRCache() {
+        const now = Date.now();
+
+        for (const [sessionType, timestamp] of this.qrTimestamps.entries()) {
+            if (now - timestamp > this.qrCacheDuration) {
+                this.qrTimestamps.delete(sessionType);
+                console.log(`🧹 Limpiado timestamp QR antiguo para: ${sessionType}`);
+            }
+        }
+    }
+
     generateMessageKey(sessionType, to, message) {
         const cleanTo = to.replace(/[^\d]/g, '');
         const messagePreview = message.substring(0, 50);
@@ -591,13 +794,14 @@ class MultiSessionManager {
         const sessionData = this.sessions.get(sessionType);
         
         if (sessionData) {
-            const sessionIcon = sessionType === 'agent' ? '👤' : '🖥️';
+            const sessionIcon = sessionType === 'agent' ? '👤' : sessionType === 'system' ? '🖥️' : '👨‍💼';
             console.log(`${sessionIcon} Cerrando sesión ${sessionType.toUpperCase()}: ${sessionData.name}`);
             
             try {
                 await sessionData.client.destroy();
                 this.sessions.delete(sessionType);
                 this.qrCodes.delete(sessionType);
+                this.qrTimestamps.delete(sessionType);
                 
                 console.log(`✅ Sesión ${sessionType} cerrada`);
             } catch (error) {
@@ -606,9 +810,68 @@ class MultiSessionManager {
         }
     }
 
+    // 🆕 Cerrar sesión Y eliminar archivos de autenticación (para usuarios desactivados)
+    async closeSessionAndRemoveAuth(sessionType, phone) {
+        console.log(`🗑️ Cerrando sesión y eliminando auth para: ${sessionType}`);
+        
+        // Primero cerrar la sesión normalmente
+        await this.closeSession(sessionType);
+        
+        // Luego eliminar archivos de autenticación
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            
+            // sessionType puede ser número (59169173077) o 'system'
+            let clientId;
+            
+            if (sessionType === 'system') {
+                // Para el sistema, usar formato tradicional
+                clientId = `system_${phone.replace(/[^\d]/g, '')}`;
+            } else {
+                // Para usuarios, usar solo el número
+                clientId = sessionType;
+            }
+            const sessionAuthPath = path.join('.wwebjs_auth', `session-${clientId}`);
+            
+            if (fs.existsSync(sessionAuthPath)) {
+                // Eliminar recursivamente la carpeta de autenticación
+                fs.rmSync(sessionAuthPath, { recursive: true, force: true });
+                console.log(`🗑️ Eliminados archivos de auth para ${sessionType}: ${sessionAuthPath}`);
+            } else {
+                console.log(`ℹ️ No hay archivos de auth para eliminar: ${sessionType}`);
+            }
+            
+        } catch (error) {
+            console.error(`❌ Error eliminando archivos de auth para ${sessionType}:`, error.message);
+        }
+        
+        console.log(`✅ Sesión ${sessionType} cerrada completamente y auth eliminada`);
+    }
+
     // Obtener QR de una sesión
     getSessionQR(sessionType) {
-        return this.qrCodes.get(sessionType);
+        const qrCode = this.qrCodes.get(sessionType);
+        const qrTimestamp = this.qrTimestamps.get(sessionType);
+        const sessionData = this.sessions.get(sessionType);
+        
+        if (!qrCode) {
+            return null;
+        }
+        
+        // 🆕 Información adicional sobre el QR
+        const now = Date.now();
+        const ageMinutes = qrTimestamp ? Math.round((now - qrTimestamp) / 60000) : 0;
+        const isExpiringSoon = ageMinutes > 8; // Considera "expirando" después de 8 minutos
+        
+        return {
+            qr: qrCode,
+            generatedAt: qrTimestamp,
+            ageMinutes: ageMinutes,
+            isExpiringSoon: isExpiringSoon,
+            sessionStatus: sessionData?.status || 'unknown',
+            info: `QR generado hace ${ageMinutes} minuto(s)${isExpiringSoon ? ' - expirando pronto' : ''}`
+        };
     }
 
     // Estado de todas las sesiones
