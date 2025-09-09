@@ -1,12 +1,14 @@
 // servidor/modulo-respuestas/src/services/responseService.js
 
 const axios = require('axios');
+const PropertyAnalyzer = require('./propertyAnalyzer');
 
 class ResponseService {
     constructor(whatsAppConnector, fileService, templateService) {
         this.whatsAppConnector = whatsAppConnector;
         this.fileService = fileService;
         this.templateService = templateService;
+        this.propertyAnalyzer = new PropertyAnalyzer();
         
         // Cola de mensajes para reintentos
         this.messageQueue = [];
@@ -90,7 +92,6 @@ class ResponseService {
     async checkHealth() {
         const health = {
             whatsapp: false,
-            gateway: false,
             database: false,
             allConnected: false
         };
@@ -106,17 +107,6 @@ class ResponseService {
             console.error('⚠️ WhatsApp no disponible');
         }
 
-        // Verificar Gateway
-        try {
-            const response = await axios.get(
-                `${process.env.GATEWAY_URL || 'http://localhost:3000'}/api/health`,
-                { timeout: 5000 }
-            );
-            health.gateway = response.data.success === true;
-        } catch (error) {
-            console.error('⚠️ Gateway no disponible');
-        }
-
         // Verificar Base de datos
         try {
             const response = await axios.get(
@@ -128,7 +118,7 @@ class ResponseService {
             console.error('⚠️ Base de datos no disponible');
         }
 
-        health.allConnected = health.whatsapp && health.gateway && health.database;
+    health.allConnected = health.whatsapp && health.database;
 
         return health;
     }
@@ -207,8 +197,21 @@ class ResponseService {
         try {
             // Determinar tipo de respuesta basado en la fuente y tipo
             if (responseData.source === 'processing-module') {
-                // Los mensajes del módulo de procesamiento son respuestas del sistema
-                return await this.sendSystemResponse(responseData);
+                // Verificar si viene del módulo IA
+                if (responseData.metadata && responseData.metadata.source === 'ia-module') {
+                    // Analizar propiedades mencionadas en respuesta IA
+                    console.log('🔍 Analizando respuesta de IA para propiedades...');
+                    const analysis = await this.propertyAnalyzer.analyzeIAResponse(responseData);
+                    
+                    // Enriquecer respuesta con archivos y datos de propiedades
+                    const enrichedResponse = await this.propertyAnalyzer.enrichResponse(responseData, analysis);
+                    
+                    // Enviar a cliente con archivos si los hay
+                    return await this.sendToClient(enrichedResponse);
+                } else {
+                    // Los demás mensajes del módulo de procesamiento son respuestas del sistema
+                    return await this.sendSystemResponse(responseData);
+                }
             } else if (responseData.source === 'ia' || responseData.responseType === 'client') {
                 return await this.sendToClient(responseData);
             } else if (responseData.source === 'backend' || responseData.responseType === 'system') {
@@ -229,6 +232,13 @@ class ResponseService {
 
     // Enviar respuesta a cliente (vía WhatsApp-Web)
     async sendToClient(responseData) {
+        // 🔍 LOG DETALLADO - RESPUESTAS PROCESA
+        console.log('🔍 RESPUESTAS PASO 2 - Procesando datos para envío:');
+        console.log(`   📞 responseData.to: ${responseData.to}`);
+        console.log(`   👤 responseData.agentPhone: ${responseData.agentPhone}`);
+        console.log(`   📝 responseData.message: '${responseData.message?.substring(0, 100)}...' (len: ${responseData.message?.length || 0})`);
+        console.log(`   📊 responseData.templateId: ${responseData.templateId || 'none'}`);
+        
         console.log('👤 Enviando respuesta a cliente:', responseData.to);
 
         try {
@@ -245,6 +255,9 @@ class ResponseService {
                     responseData.templateData || {}
                 );
                 message = rendered.content;
+                console.log(`🔍 RESPUESTAS PASO 2.1 - Plantilla aplicada: '${message?.substring(0, 100)}...'`);
+            } else {
+                console.log(`🔍 RESPUESTAS PASO 2.1 - Sin plantilla, usando mensaje directo: '${message?.substring(0, 100)}...'`);
             }
 
             // Preparar archivos multimedia si existen
@@ -253,13 +266,22 @@ class ResponseService {
                 mediaFiles = await this.prepareMediaFiles(responseData.files);
             }
 
-            // Enviar a través de WhatsApp-Web
-            const result = await this.whatsAppConnector.sendViaWhatsAppWeb({
+            // 🔍 LOG DETALLADO - RESPUESTAS ENVÍA A WHATSAPP
+            const whatsappPayload = {
                 agentPhone: responseData.agentPhone,
                 to: responseData.to,
                 message: message,
                 mediaFiles: mediaFiles
-            });
+            };
+            
+            console.log('🔍 RESPUESTAS PASO 3 - Enviando a WhatsApp Connector:');
+            console.log(`   👤 agentPhone: ${whatsappPayload.agentPhone}`);
+            console.log(`   📞 to: ${whatsappPayload.to}`);
+            console.log(`   📝 message: '${whatsappPayload.message?.substring(0, 100)}...' (len: ${whatsappPayload.message?.length || 0})`);
+            console.log(`   🎬 mediaFiles: ${whatsappPayload.mediaFiles?.length || 0} archivos`);
+
+            // Enviar a través de WhatsApp-Web
+            const result = await this.whatsAppConnector.sendViaWhatsAppWeb(whatsappPayload);
 
             // Actualizar estadísticas
             this.stats.totalSent++;

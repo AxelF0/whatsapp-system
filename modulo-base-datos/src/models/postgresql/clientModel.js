@@ -7,8 +7,8 @@ class ClientModel {
     async create(clientData) {
         // La tabla Cliente del script no tiene columna 'preferencias'. Mapeamos solo columnas existentes.
         const query = `
-            INSERT INTO Cliente (nombre, apellido, telefono, email, estado)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO Cliente (nombre, apellido, telefono, email, estado, agente_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         `;
         const values = [
@@ -16,7 +16,8 @@ class ClientModel {
             clientData.apellido || null,
             clientData.telefono,
             clientData.email || null,
-            clientData.estado || 1
+            clientData.estado || 1,
+            clientData.agente_id || null
         ];
         const result = await this.client.query(query, values);
         return result.rows[0];
@@ -62,8 +63,9 @@ class ClientModel {
                 SET nombre = COALESCE($1, nombre),
                     apellido = COALESCE($2, apellido),
                     email = COALESCE($3, email),
-                    estado = COALESCE($4, estado)
-                WHERE telefono = $5
+                    estado = COALESCE($4, estado),
+                    agente_id = COALESCE($5, agente_id)
+                WHERE telefono = $6
                 RETURNING *
             `;
             const values = [
@@ -71,6 +73,7 @@ class ClientModel {
                 clientData.apellido || null,
                 clientData.email || null,
                 clientData.estado || 1,
+                clientData.agente_id || null,
                 clientData.telefono
             ];
             const result = await this.client.query(query, values);
@@ -88,15 +91,21 @@ class ClientModel {
         return result.rows[0] || null;
     }
 
-    // Obtener todos los clientes
-    async findAll() {
-        const query = `
-            SELECT id, nombre, apellido, telefono, email, estado, fecha_creacion
-            FROM Cliente 
-            WHERE estado = 1 
-            ORDER BY id ASC
-        `;
-        const result = await this.client.query(query);
+    // Obtener todos los clientes o solo los de un agente
+    async findAll(agente_id = null) {
+        let query = `
+            SELECT c.id, c.nombre, c.apellido, c.telefono, c.email, c.estado, c.fecha_creacion, c.agente_id,
+                   u.nombre AS agente_nombre, u.apellido AS agente_apellido
+            FROM Cliente c
+            LEFT JOIN Usuario u ON c.agente_id = u.id
+            WHERE c.estado = 1`;
+        let values = [];
+        if (agente_id) {
+            query += ' AND c.agente_id = $1';
+            values.push(agente_id);
+        }
+        query += ' ORDER BY c.id ASC';
+        const result = await this.client.query(query, values);
         return result.rows;
     }
 
@@ -161,9 +170,11 @@ class ClientModel {
     // Listar todos los clientes sin filtrar por estado (para administración)
     async findAllAnyStatus() {
         const query = `
-            SELECT id, nombre, apellido, telefono, email, estado, fecha_creacion
-            FROM Cliente 
-            ORDER BY id ASC
+            SELECT c.id, c.nombre, c.apellido, c.telefono, c.email, c.estado, c.fecha_creacion, c.agente_id,
+                   u.nombre AS agente_nombre, u.apellido AS agente_apellido
+            FROM Cliente c
+            LEFT JOIN Usuario u ON c.agente_id = u.id
+            ORDER BY c.id ASC
         `;
         const result = await this.client.query(query);
         return result.rows;
@@ -172,10 +183,12 @@ class ClientModel {
     // Listar clientes por estado específico (activos/inactivos)
     async findByStatus(estado) {
         const query = `
-            SELECT id, nombre, apellido, telefono, email, estado, fecha_creacion
-            FROM Cliente 
-            WHERE estado = $1
-            ORDER BY id ASC
+            SELECT c.id, c.nombre, c.apellido, c.telefono, c.email, c.estado, c.fecha_creacion, c.agente_id,
+                   u.nombre AS agente_nombre, u.apellido AS agente_apellido
+            FROM Cliente c
+            LEFT JOIN Usuario u ON c.agente_id = u.id
+            WHERE c.estado = $1
+            ORDER BY c.id ASC
         `;
         const result = await this.client.query(query, [estado]);
         return result.rows;

@@ -107,6 +107,15 @@ app.post('/api/send', async (req, res) => {
 // Enviar respuesta a cliente (vía WhatsApp-Web)
 app.post('/api/send/client', async (req, res) => {
     try {
+        // 🔍 LOG DETALLADO - RESPUESTAS RECIBE DATOS
+        console.log('🔍 RESPUESTAS PASO 1 - Datos recibidos desde procesamiento:');
+        console.log(`   📞 to: ${req.body.to}`);
+        console.log(`   👤 agentPhone: ${req.body.agentPhone}`);
+        console.log(`   📝 message: '${req.body.message?.substring(0, 100)}...' (len: ${req.body.message?.length || 0})`);
+        console.log(`   📋 type: ${req.body.type}`);
+        console.log(`   🏷️ source: ${req.body.source}`);
+        console.log(`   📊 templateId: ${req.body.templateId || 'none'}`);
+        
         console.log('👤 Enviando respuesta a cliente');
 
         const result = await responseService.sendToClient(req.body);
@@ -423,7 +432,6 @@ async function startResponseModule() {
         const health = await responseService.checkHealth();
         console.log('🔗 Conectividad:', {
             whatsapp: health.whatsapp ? '✅' : '❌',
-            gateway: health.gateway ? '✅' : '❌',
             database: health.database ? '✅' : '❌'
         });
 

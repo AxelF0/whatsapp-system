@@ -1,25 +1,20 @@
 // servidor/modulo-base-datos/src/index.js - API REST Principal
-
 const express = require('express');
 const cors = require('cors');
 
 // Conexiones a bases de datos
 const pgClient = require('./connections/pgConnection');
-const mongoose = require('./connections/mongoConnection');
 
 // Modelos
 const  UserModel = require('./models/postgresql/userModel');
 const ClientModel = require('./models/postgresql/clientModel');
 const PropertyModel = require('./models/postgresql/propertyModel');
 
-const { Message, Conversation } = require('./models/mongodb');
 
 // Servicios
 const UserService = require('./services/userService');
 const ClientService = require('./services/clientService');
 const PropertyService = require('./services/propertyService');
-const MessageService = require('./services/messageService');
-const SessionService = require('./services/sessionService');
 
 const app = express();
 const PORT = process.env.DATABASE_PORT || 3006;
@@ -38,16 +33,12 @@ const propertyModel = new PropertyModel(pgClient);
 const userService = new UserService(userModel);
 const clientService = new ClientService(clientModel);
 const propertyService = new PropertyService(propertyModel);
-const messageService = new MessageService(Message, Conversation);
-const sessionService = new SessionService(userModel);
 
 // Hacer servicios disponibles para otros módulos
 app.locals.services = {
     userService,
     clientService,
-    propertyService,
-    messageService,
-    sessionService
+    propertyService
 };
 
 // Rutas para Usuarios
@@ -211,7 +202,8 @@ app.put('/api/users/:id', async (req, res) => {
 // Rutas para Clientes
 app.get('/api/clients', async (req, res) => {
     try {
-        const clients = await clientService.getAllClients();
+        const agente_id = req.query.agente_id ? Number(req.query.agente_id) : null;
+        const clients = await clientService.getAllClients(agente_id);
         res.json({ success: true, data: clients });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -242,7 +234,8 @@ app.get('/api/clients/phone/:phone', async (req, res) => {
 
 app.get('/api/clients/find/:identifier', async (req, res) => {
     try {
-        const client = await clientService.getClientByIdOrPhone(req.params.identifier);
+        const agente_id = req.query.agente_id ? Number(req.query.agente_id) : null;
+        const client = await clientService.findClientByIdOrPhone(req.params.identifier, agente_id);
         if (client) {
             res.json({ success: true, data: client });
         } else {
@@ -269,7 +262,8 @@ app.put('/api/clients/:id', async (req, res) => {
 // Obtener clientes inactivos/eliminados
 app.get('/api/clients/inactive', async (req, res) => {
     try {
-        const clients = await clientService.getInactiveClients();
+        const agente_id = req.query.agente_id ? Number(req.query.agente_id) : null;
+        const clients = await clientService.getInactiveClients(agente_id);
         res.json({ success: true, data: clients });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -394,16 +388,6 @@ app.put('/api/properties/:id/toggle-status', async (req, res) => {
     }
 });
 
-// Rutas para Mensajes (MongoDB)
-app.post('/api/messages', async (req, res) => {
-    try {
-        const message = await messageService.saveMessage(req.body);
-        res.status(201).json({ success: true, data: message });
-    } catch (error) {
-        res.status(400).json({ success: false, error: error.message });
-    }
-});
-
 app.get('/api/conversations/:clientPhone/:agentPhone', async (req, res) => {
     try {
         const conversation = await messageService.getOrCreateConversation(
@@ -416,64 +400,7 @@ app.get('/api/conversations/:clientPhone/:agentPhone', async (req, res) => {
     }
 });
 
-// Rutas para Sesiones de Usuarios (MongoDB)
-app.post('/api/sessions/validate', async (req, res) => {
-    try {
-        const { phoneNumber } = req.body;
-        if (!phoneNumber) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Número de teléfono requerido' 
-            });
-        }
 
-        const result = await sessionService.validateAndCreateSession(phoneNumber);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-app.get('/api/sessions/:phoneNumber', async (req, res) => {
-    try {
-        const session = await sessionService.getActiveSession(req.params.phoneNumber);
-        if (session) {
-            res.json({ success: true, data: session });
-        } else {
-            res.status(404).json({ success: false, error: 'Sesión no encontrada' });
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-app.delete('/api/sessions/:phoneNumber', async (req, res) => {
-    try {
-        const result = await sessionService.closeSession(req.params.phoneNumber);
-        res.json({ success: true, data: { closed: result } });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-app.put('/api/sessions/:phoneNumber/menu', async (req, res) => {
-    try {
-        const { menuState } = req.body;
-        const result = await sessionService.updateMenuState(req.params.phoneNumber, menuState);
-        res.json({ success: true, data: { updated: result } });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-app.get('/api/sessions/stats/summary', async (req, res) => {
-    try {
-        const stats = await sessionService.getSessionStats();
-        res.json({ success: true, data: stats });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -481,15 +408,11 @@ app.get('/api/health', async (req, res) => {
         // Test PostgreSQL
         await pgClient.query('SELECT 1');
         
-        // Test MongoDB
-        const mongoStatus = mongoose.connection.readyState;
-        
         res.json({
             success: true,
             status: 'healthy',
             databases: {
                 postgresql: 'connected',
-                mongodb: mongoStatus === 1 ? 'connected' : 'disconnected'
             }
         });
     } catch (error) {
@@ -504,18 +427,6 @@ app.get('/api/health', async (req, res) => {
 // Iniciar servidor
 app.listen(PORT, () => {
     console.log(`📊 Módulo Base de Datos ejecutándose en puerto ${PORT}`);
-    
-    // Tarea de limpieza de sesiones expiradas cada 10 minutos
-    setInterval(async () => {
-        try {
-            const cleaned = await sessionService.cleanExpiredSessions();
-            if (cleaned > 0) {
-                console.log(`🧹 Limpieza automática: ${cleaned} sesiones expiradas eliminadas`);
-            }
-        } catch (error) {
-            console.error('❌ Error en limpieza automática:', error.message);
-        }
-    }, 10 * 60 * 1000); // 10 minutos
 });
 
 module.exports = app;

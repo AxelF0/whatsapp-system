@@ -53,13 +53,22 @@ app.post('/api/process/message', async (req, res) => {
         let result;
 
         // 2. Rutear según el tipo de mensaje
-        if (analysis.type === 'client_query') {
-            // Es una consulta de cliente → Ir directamente al módulo IA (no implementado aquí)
-            result = {
-                action: 'redirect_to_ia',
-                reason: 'Consulta de cliente - debe ser manejada por módulo IA',
-                processed: false
+        if (analysis.type === 'client_query' && analysis.requiresIA) {
+            // Es una consulta de cliente que requiere IA
+            console.log('🤖 Enviando consulta al módulo IA...');
+            
+            const queryData = {
+                question: req.body.body,
+                from_phone: analysis.clientPhone,
+                to_phone: analysis.agentPhone,
+                conversation_history: '', // TODO: implementar historial
+                query_analysis: analysis.queryAnalysis
             };
+            
+            result = await systemRouter.sendToIA(queryData);
+            result.action = 'sent_to_ia';
+            result.processed = true;
+            
         } else if (analysis.type === 'system_command') {
             // Es un comando de agente/gerente → Ir a Backend
             result = await systemRouter.routeToBackend(req.body, analysis);

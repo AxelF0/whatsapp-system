@@ -5,7 +5,8 @@ class ClientController {
 
     async list(req, res) {
         try {
-            const clients = await this.clientService.list(req.query);
+            const agente_id = req.query.agente_id || null;
+            const clients = await this.clientService.list({ agente_id });
             res.json({
                 success: true,
                 data: clients

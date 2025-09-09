@@ -4,12 +4,10 @@ const axios = require('axios');
 
 class MessageProcessor {
     constructor() {
-        this.gatewayUrl = null;
         this.databaseUrl = null;
         this.processingUrl = null;
         this.retryAttempts = 3;
         this.retryDelay = 1000;
-
         // Contadores para estadísticas
         this.stats = {
             clientMessagesProcessed: 0,
@@ -21,12 +19,10 @@ class MessageProcessor {
 
     // Configurar URLs
     configure(config) {
-        this.gatewayUrl = config.gatewayUrl;
         this.databaseUrl = config.databaseUrl;
         this.processingUrl = config.processingUrl;
 
         console.log('🔧 MessageProcessor configurado:');
-        console.log(`   Gateway: ${this.gatewayUrl}`);
         console.log(`   Database: ${this.databaseUrl}`);
         console.log(`   Processing: ${this.processingUrl}`);
     }
@@ -59,12 +55,11 @@ class MessageProcessor {
 
             // Enviar al módulo de procesamiento
             const response = await this.sendToGateway(processingData, 'client-message');
-
             if (response.success) {
                 console.log(`✅ Mensaje de cliente procesado exitosamente`);
                 return response;
             } else {
-                throw new Error(response.error || 'Gateway reportó error');
+                throw new Error(response.error || 'Error en procesamiento');
             }
 
         } catch (error) {
@@ -127,8 +122,7 @@ class MessageProcessor {
 
             // 3. Enviar al módulo de procesamiento
             const response = await this.sendToGateway(processingData, 'system-command');
-            console.log('✅ Respuesta del gateway:', response);
-
+            console.log('✅ Respuesta del procesamiento:', response);
             return response;
 
         } catch (error) {
@@ -182,9 +176,7 @@ class MessageProcessor {
         // Definir endpoint y URL fuera del try para que estén disponibles en catch
         const endpoint = '/api/process/message';
         const processingUrl = this.processingUrl || 'http://localhost:3002';
-        
         try {
-
             console.log(`📡 ENVIANDO AL MÓDULO DE PROCESAMIENTO:`);
             console.log(`   🌐 URL: ${processingUrl}${endpoint}`);
             console.log(`   📦 Data:`, JSON.stringify({
@@ -193,7 +185,6 @@ class MessageProcessor {
                 messageType: messageType,
                 sessionType: messageData.sessionType
             }, null, 2));
-
             const response = await axios.post(
                 `${processingUrl}${endpoint}`,
                 {
@@ -209,22 +200,17 @@ class MessageProcessor {
                     }
                 }
             );
-
             console.log(`✅ RESPUESTA DEL PROCESAMIENTO:`, response.data);
             return response.data;
-
         } catch (error) {
             console.error(`❌ INTENTO ${attempt} FALLÓ:`);
             console.error(`   🔗 URL: ${this.processingUrl || 'http://localhost:3002'}${endpoint}`);
             console.error(`   ❌ Error: ${error.message}`);
-            
             if (error.code === 'ECONNREFUSED') {
                 console.error(`   🔌 CONEXIÓN RECHAZADA - ¿Está ejecutándose el módulo de procesamiento?`);
             }
-
             if (attempt < this.retryAttempts) {
                 console.log(`🔄 Reintentando en ${this.retryDelay}ms... (${attempt}/${this.retryAttempts})`);
-
                 await this.sleep(this.retryDelay);
                 return this.sendToGateway(messageData, messageType, attempt + 1);
             } else {
@@ -259,14 +245,14 @@ class MessageProcessor {
     cleanPhoneNumber(phone) {
         // Remover @c.us si está presente ANTES de eliminar otros caracteres
         let cleaned = phone.replace('@c.us', '');
-        
+
         // Eliminar caracteres no numéricos 
         cleaned = cleaned.replace(/\D/g, '');
 
         // Los números en BD empiezan con '59' (Bolivia), no '591'
         // No necesitamos agregar código de país adicional
         console.log(`📞 Número limpiado: ${phone} → ${cleaned}`);
-        
+
         return cleaned;
     }
 
@@ -325,25 +311,6 @@ class MessageProcessor {
         }
     }
 
-    // Verificar conectividad con gateway
-    async checkGatewayHealth() {
-        try {
-            const response = await axios.get(`${this.gatewayUrl}/api/health`, {
-                timeout: 5000
-            });
-
-            return {
-                available: true,
-                status: response.data
-            };
-        } catch (error) {
-            console.error(`❌ Gateway no disponible:`, error.message);
-            return {
-                available: false,
-                error: error.message
-            };
-        }
-    }
 
     // Verificar conectividad con base de datos
     async checkDatabaseHealth() {
@@ -369,7 +336,6 @@ class MessageProcessor {
     getStats() {
         return {
             ...this.stats,
-            gatewayUrl: this.gatewayUrl,
             databaseUrl: this.databaseUrl,
             retryAttempts: this.retryAttempts,
             retryDelay: this.retryDelay

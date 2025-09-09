@@ -513,6 +513,20 @@ class MultiSessionManager {
         }, 60000); // 60 segundos
     }
 
+    // Determinar tipo real de sesión (agente vs system)
+    determineSessionType(sessionData) {
+        if (!sessionData) return 'unknown';
+        
+        // Si el nombre contiene ciertas palabras clave, es sistema
+        const nameUpper = sessionData.name.toUpperCase();
+        if (nameUpper.includes('SISTEMA') || nameUpper.includes('SYSTEM') || nameUpper.includes('REMAXI')) {
+            return 'system';
+        }
+        
+        // Si es un usuario individual (no sistema), es agente
+        return 'agent';
+    }
+
     // Determinar si ignorar un mensaje
     shouldIgnoreMessage(message) {
         const ignoredTypes = [
@@ -606,13 +620,17 @@ class MultiSessionManager {
                 return;
             }
             
-            if (sessionType === 'agent') {
+            // Determinar el tipo real de sesión basado en sessionData
+            const sessionRealType = this.determineSessionType(sessionData);
+            console.log(`🔍 Tipo de sesión determinado: ${sessionRealType} (sessionType original: ${sessionType})`);
+            
+            if (sessionRealType === 'agent') {
                 // Mensajes al AGENTE = consultas de clientes
                 console.log(`📨 RUTA AGENTE: Procesando consulta de cliente: ${message.from}`);
                 const result = await this.messageProcessor.processClientMessage(messageData);
                 console.log(`✅ Resultado processClientMessage:`, result);
                 
-            } else if (sessionType === 'system') {
+            } else if (sessionRealType === 'system') {
                 // Mensajes al SISTEMA = comandos de agentes/gerentes
                 console.log(`🔧 RUTA SISTEMA: Procesando comando del sistema: ${message.from}`);
                 console.log(`📋 Mensaje recibido: "${messageData.body}"`);

@@ -4,7 +4,6 @@
 const axios = require('axios');
 
 const modules = [
-    { name: 'Gateway', url: 'http://localhost:3000/api/health' },
     { name: 'WhatsApp', url: 'http://localhost:3001/api/health' },
     { name: 'Procesamiento', url: 'http://localhost:3002/api/health' },
     { name: 'IA', url: 'http://localhost:3003/api/health' },
@@ -52,7 +51,7 @@ async function checkAllModules() {
 async function checkCrossConnections() {
     console.log('\n🔗 Verificando conexiones cruzadas...\n');
     
-    // Verificar que Respuestas puede ver WhatsApp y Gateway
+    // Verificar que Respuestas puede ver WhatsApp
     try {
         console.log('Desde Respuestas (3005):');
         const respHealth = await axios.get('http://localhost:3005/api/health');

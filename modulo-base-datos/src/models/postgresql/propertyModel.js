@@ -242,10 +242,10 @@ class PropertyModel {
         let paramCount = 1;
 
         // Construir dinámicamente la query según los campos a actualizar
-        const validFields = ['nombre_propiedad', 'descripcion', 'precio_venta', 'precio_alquiler', 'ubicacion', 
-                             'superficie', 'dimensiones', 'tipo_propiedad_id', 'tipo_operacion_id', 
-                             'estado_propiedad_id', 'estado'];
-        
+        const validFields = ['nombre_propiedad', 'descripcion', 'precio_venta', 'precio_alquiler', 'ubicacion',
+            'superficie', 'dimensiones', 'tipo_propiedad_id', 'tipo_operacion_id',
+            'estado_propiedad_id', 'estado'];
+
         for (const [key, value] of Object.entries(updates)) {
             if (value !== undefined && validFields.includes(key)) {
                 fields.push(`${key} = $${paramCount}`);
@@ -429,7 +429,7 @@ class PropertyModel {
         // Primero obtener estado actual
         const currentQuery = `SELECT estado FROM Propiedad WHERE id = $1`;
         const currentResult = await this.client.query(currentQuery, [id]);
-        
+
         if (currentResult.rows.length === 0) {
             throw new Error('Propiedad no encontrada');
         }
@@ -521,22 +521,22 @@ class PropertyModel {
         let priceText = '';
 
         if (tipoOperacion === 'venta') {
-            priceText = property.precio_venta ? 
-                `💰 $${Number(property.precio_venta).toLocaleString()} Bs` : 
+            priceText = property.precio_venta ?
+                `💰 $${Number(property.precio_venta).toLocaleString()} Bs` :
                 'Precio de venta no disponible';
         } else if (tipoOperacion === 'alquiler') {
-            priceText = property.precio_alquiler ? 
-                `🏠 $${Number(property.precio_alquiler).toLocaleString()} Bs/mes` : 
+            priceText = property.precio_alquiler ?
+                `🏠 $${Number(property.precio_alquiler).toLocaleString()} Bs/mes` :
                 'Precio de alquiler no disponible';
         } else if (tipoOperacion === 'venta y alquiler') {
-            const venta = property.precio_venta ? 
+            const venta = property.precio_venta ?
                 `Venta: $${Number(property.precio_venta).toLocaleString()} Bs` : null;
-            const alquiler = property.precio_alquiler ? 
+            const alquiler = property.precio_alquiler ?
                 `Alquiler: $${Number(property.precio_alquiler).toLocaleString()} Bs/mes` : null;
-            
+
             const precios = [venta, alquiler].filter(p => p !== null);
-            priceText = precios.length > 0 ? 
-                `💰 ${precios.join(' | ')}` : 
+            priceText = precios.length > 0 ?
+                `💰 ${precios.join(' | ')}` :
                 'Precios no disponibles';
         }
 
@@ -558,7 +558,7 @@ class PropertyModel {
                 errors.push('Precio de alquiler es requerido para propiedades en alquiler');
             }
         } else if (tipoOperacionId === 3) { // Venta y Alquiler
-            if ((!propertyData.precio_venta || propertyData.precio_venta <= 0) && 
+            if ((!propertyData.precio_venta || propertyData.precio_venta <= 0) &&
                 (!propertyData.precio_alquiler || propertyData.precio_alquiler <= 0)) {
                 errors.push('Al menos un precio (venta o alquiler) es requerido para propiedades de venta y alquiler');
             }

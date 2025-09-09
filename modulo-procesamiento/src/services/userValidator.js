@@ -5,7 +5,14 @@ const axios = require('axios');
 class UserValidator {
     constructor() {
         this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
-        this.timeout = 10000; // 10 segundos
+        this.timeout = 5000; // Reducido a 5 segundos para WhatsApp
+        
+        // Cache en memoria para validaciones
+        this.validationCache = new Map();
+        this.cacheTimeout = 8 * 60 * 1000; // 8 minutos
+        
+        // Limpiar cache cada 10 minutos
+        setInterval(() => this.cleanExpiredCache(), 10 * 60 * 1000);
     }
 
     async validateUser(phoneNumber) {
@@ -15,7 +22,14 @@ class UserValidator {
             // 1. Limpiar número de teléfono
             const cleanPhone = this.cleanPhoneNumber(phoneNumber);
             
-            // 2. NUEVA LÓGICA: Verificar sesión persistente primero (vía Database Module)
+            // 2. CACHE: Verificar cache primero
+            const cached = this.getCachedValidation(cleanPhone);
+            if (cached) {
+                console.log('⚡ Usuario válido desde CACHE:', cached.userData?.nombre || 'Usuario');
+                return cached;
+            }
+            
+            // 3. NUEVA LÓGICA: Verificar sesión persistente primero (vía Database Module)
             try {
                 const sessionResponse = await axios.post(`${this.databaseUrl}/api/sessions/validate`, {
                     phoneNumber: cleanPhone
@@ -43,6 +57,8 @@ class UserValidator {
                         console.log('✅ Usuario validado y nueva sesión creada (Database Module):', sessionData.user.nombre);
                     }
 
+                    // Cachear resultado para futuras consultas
+                    this.setCachedValidation(cleanPhone, validationResult);
                     return validationResult;
                 }
             } catch (sessionError) {
@@ -50,7 +66,7 @@ class UserValidator {
                 // Continuar con el fallback si el Database Module falla
             }
 
-            // 3. FALLBACK: Consulta directa a PostgreSQL (último recurso)
+            // 4. FALLBACK: Consulta directa a PostgreSQL (último recurso)
             const response = await axios.get(`${this.databaseUrl}/api/users/validate/${cleanPhone}`, {
                 timeout: this.timeout,
                 headers: {
@@ -68,8 +84,11 @@ class UserValidator {
 
             if (validationResult.isValid) {
                 console.log('✅ Usuario válido (método directo):', validationResult.userData.nombre);
+                // Cachear resultado positivo
+                this.setCachedValidation(cleanPhone, validationResult);
             } else {
                 console.log('❌ Usuario no encontrado en sistema');
+                // NO cachear resultados negativos para permitir retry
             }
 
             return validationResult;
@@ -174,7 +193,7 @@ class UserValidator {
         return userDetails;
     }
 
-    // Cache methods removed - now using MongoDB sessions only
+    // Cache methods - using in-memory cache with TTL
 
     // Verificar conectividad con base de datos
     async testDatabaseConnection() {
@@ -228,6 +247,73 @@ class UserValidator {
         }
 
         return validUsers;
+    }
+
+    // ==================== MÉTODOS DE CACHE ====================
+    
+    // Obtener validación desde cache
+    getCachedValidation(phoneNumber) {
+        const cached = this.validationCache.get(phoneNumber);
+        
+        if (!cached) return null;
+        
+        // Verificar si no ha expirado
+        if (Date.now() - cached.cachedAt > this.cacheTimeout) {
+            this.validationCache.delete(phoneNumber);
+            return null;
+        }
+        
+        // Actualizar timestamp para reflejar uso desde cache
+        return {
+            ...cached.validation,
+            timestamp: Date.now(),
+            fromCache: true
+        };
+    }
+    
+    // Guardar validación en cache
+    setCachedValidation(phoneNumber, validation) {
+        // Solo cachear validaciones exitosas
+        if (validation.isValid) {
+            this.validationCache.set(phoneNumber, {
+                validation,
+                cachedAt: Date.now()
+            });
+            console.log(`💾 Usuario cacheado: ${phoneNumber} (${validation.userData?.nombre})`);
+        }
+    }
+    
+    // Limpiar entries expirados del cache
+    cleanExpiredCache() {
+        const now = Date.now();
+        let cleaned = 0;
+        
+        for (const [phone, cached] of this.validationCache.entries()) {
+            if (now - cached.cachedAt > this.cacheTimeout) {
+                this.validationCache.delete(phone);
+                cleaned++;
+            }
+        }
+        
+        if (cleaned > 0) {
+            console.log(`🧹 Cache limpiado: ${cleaned} entries expirados removidos`);
+        }
+    }
+    
+    // Limpiar todo el cache (util para testing o reset)
+    clearCache() {
+        const size = this.validationCache.size;
+        this.validationCache.clear();
+        console.log(`🗑️ Cache completamente limpiado: ${size} entries removidos`);
+    }
+    
+    // Obtener estadísticas del cache
+    getCacheStats() {
+        return {
+            size: this.validationCache.size,
+            timeout: this.cacheTimeout,
+            entries: Array.from(this.validationCache.keys())
+        };
     }
 }
 

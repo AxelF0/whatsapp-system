@@ -443,7 +443,7 @@ async function setupWhatsAppForNewAgent(agentData) {
                 phone: agentData.agentPhone,
                 name: agentData.agentName
             },
-            { timeout: 30000 }
+            { timeout: 12000 }
         );
 
         if (!sessionResponse.data.success) {
@@ -476,6 +476,7 @@ async function setupWhatsAppForNewAgent(agentData) {
             }
 
             // Generar imagen QR
+
             const qrImagePath = path.join(tempDir, `qr_${sessionType}_${Date.now()}.png`);
             await qrCode.toFile(qrImagePath, qrResponse.data.data.qr, {
                 width: 512,
@@ -487,6 +488,18 @@ async function setupWhatsAppForNewAgent(agentData) {
             });
 
             console.log(`📷 Imagen QR generada: ${qrImagePath}`);
+
+            // Programar eliminación automática del QR inicial después de 70 segundos
+            setTimeout(() => {
+                try {
+                    if (fs.existsSync(qrImagePath)) {
+                        fs.unlinkSync(qrImagePath);
+                        console.log(`🗑️ QR inicial eliminado automáticamente: ${qrImagePath}`);
+                    }
+                } catch (err) {
+                    console.warn(`⚠️ Error eliminando QR inicial automáticamente: ${err.message}`);
+                }
+            }, 70000); // 70 segundos
 
             // 4. ENVIAR MENSAJE CON INSTRUCCIONES
             const instructionMessage = `📱 **CONFIGURACIÓN WHATSAPP**
@@ -617,16 +630,17 @@ async function startQRRegeneration(sessionType, managerPhone, agentName, initial
                 console.log(`✅ Nuevo QR enviado al gerente (intento ${attempts})`);
                 
                 // Programar eliminación del archivo anterior
-                if (attempts > 1) {
-                    setTimeout(() => {
-                        try {
+                // Programar eliminación automática de cada QR generado después de 70 segundos
+                setTimeout(() => {
+                    try {
+                        if (fs.existsSync(qrImagePath)) {
                             fs.unlinkSync(qrImagePath);
-                            console.log(`🗑️ QR temporal eliminado: ${qrImagePath}`);
-                        } catch (cleanError) {
-                            console.warn(`⚠️ Error eliminando QR temporal: ${cleanError.message}`);
+                            console.log(`🗑️ QR temporal eliminado automáticamente: ${qrImagePath}`);
                         }
-                    }, 65000); // Eliminar después de 1 minuto + 5 segundos
-                }
+                    } catch (cleanError) {
+                        console.warn(`⚠️ Error eliminando QR temporal automáticamente: ${cleanError.message}`);
+                    }
+                }, 70000); // 70 segundos
             }
             
         } catch (error) {
@@ -674,7 +688,8 @@ async function startBackendModule() {
 
         // Actualizar estadísticas cada 5 minutos
         setInterval(() => {
-            commandProcessor.updateStats().catch(console.error);
+            // commandProcessor.updateStats().catch(console.error);
+            console.log('📊 Estadísticas actualizadas:', new Date().toISOString());
         }, 300000);
 
     } catch (error) {

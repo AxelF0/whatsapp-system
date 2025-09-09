@@ -969,6 +969,8 @@ class CommandProcessor {
     async handleCreateClient(commandData) {
         const params = commandData.command.parameters;
         const clientData = params.clientData || {};
+        // Obtener agente_id desde commandData o userData
+        const agente_id = commandData?.userData?.id || commandData?.agentId || commandData?.user?.id || commandData?.session?.userData?.id;
 
         if (!clientData.telefono) {
             throw new Error('Teléfono del cliente requerido');
@@ -977,13 +979,16 @@ class CommandProcessor {
         if (!clientData.nombre || !clientData.apellido) {
             throw new Error('Nombre y apellido del cliente son requeridos');
         }
+        // Si no se encuentra agente_id, no bloquear el registro, usar null
+        console.log('🔍 Agente ID encontrado:', agente_id);
 
         const client = await this.clientService.createOrUpdate({
             nombre: clientData.nombre,
             apellido: clientData.apellido,
             telefono: clientData.telefono,
             email: clientData.email || '',
-            estado: 1
+            estado: 1,
+            agente_id: agente_id || null
         });
 
         return {
@@ -1058,24 +1063,28 @@ class CommandProcessor {
 
     // Handler: Listar Clientes
     async handleListClients(commandData) {
-        const clients = await this.clientService.list();
+        // Obtener el agente actual desde commandData.user (debe estar presente en sesión)
+        const agente_id = commandData?.user?.id || null;
+        console.log('🔍 Listando clientes para agente ID:', agente_id);
+        
+        const clients = await this.clientService.list({ agente_id });
 
         if (clients.length === 0) {
             return {
                 success: true,
                 action: 'clients_listed',
-                message: '📋 No hay clientes registrados',
+                message: '📋 No hay clientes registrados para tu usuario',
                 data: []
             };
         }
 
         const listMessage = clients.slice(0, 15).map((c, i) => {
-            let clientInfo = `${i + 1}. 👤 ${c.nombre} ${c.apellido}\n   📱 ${c.telefono}`;
+            let clientInfo = `${i + 1}. 👤 ${c.nombre} ${c.apellido} (ID: ${c.id})\n   📱 ${c.telefono}`;
             if (c.email) {
                 clientInfo += `\n   📧 ${c.email}`;
             }
-            if (c.id) {
-                clientInfo += `\n   🏷️ ID: ${c.id}`;
+            if (c.agente_nombre || c.agente_apellido) {
+                clientInfo += `\n   👔 Agente: ${(c.agente_nombre || '')} ${(c.agente_apellido || '')}`.trim();
             }
             return clientInfo;
         }).join('\n\n');
@@ -1092,24 +1101,27 @@ class CommandProcessor {
 
     // Handler: Listar Clientes Eliminados
     async handleListClientsInactive(commandData) {
-        const clients = await this.clientService.listInactive();
+        const agente_id = commandData?.user?.id || null;
+        console.log('🔍 Listando clientes eliminados para agente ID:', agente_id);
+        
+        const clients = await this.clientService.listInactive({ agente_id });
 
         if (clients.length === 0) {
             return {
                 success: true,
                 action: 'clients_inactive_listed',
-                message: '📋 No hay clientes eliminados',
+                message: '📋 No hay clientes eliminados para tu usuario',
                 data: []
             };
         }
 
         const listMessage = clients.slice(0, 15).map((c, i) => {
-            let clientInfo = `${i + 1}. 👤 ${c.nombre} ${c.apellido}\n   📱 ${c.telefono}`;
+            let clientInfo = `${i + 1}. 👤 ${c.nombre} ${c.apellido} (ID: ${c.id})\n   📱 ${c.telefono}`;
             if (c.email) {
                 clientInfo += `\n   📧 ${c.email}`;
             }
-            if (c.id) {
-                clientInfo += `\n   🏷️ ID: ${c.id}`;
+            if (c.agente_nombre || c.agente_apellido) {
+                clientInfo += `\n   👔 Agente: ${(c.agente_nombre || '')} ${(c.agente_apellido || '')}`.trim();
             }
             return clientInfo;
         }).join('\n\n');
@@ -1273,19 +1285,20 @@ class CommandProcessor {
     async handleDeleteClient(commandData) {
         const params = commandData.command.parameters;
         const identifier = params.identifier || params.clientIdentifier;
+        const agente_id = commandData?.user?.id || null;
 
         if (!identifier) {
             throw new Error('ID o teléfono del cliente requerido');
         }
 
-        // Buscar cliente por ID o teléfono (cualquier estado)
-        const client = await this.clientService.findClientByIdOrPhone(identifier);
+        // Buscar cliente por ID o teléfono (cualquier estado) pero solo del agente actual
+        const client = await this.clientService.findClientByIdOrPhone(identifier, agente_id);
 
         if (!client) {
             return {
                 success: false,
                 action: 'delete_client',
-                message: '❌ Cliente no encontrado',
+                message: '❌ Cliente no encontrado o no tienes permisos para eliminarlo',
                 data: null
             };
         }
@@ -1418,7 +1431,7 @@ class CommandProcessor {
                     const idResponse = await axios.get(
                         `${this.databaseUrl}/api/users/find-any-status-by-id/${identifier}`,
                         { 
-                            timeout: 15000,
+                            timeout: 12000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
@@ -1432,7 +1445,7 @@ class CommandProcessor {
                         const phoneResponse = await axios.get(
                             `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
                             { 
-                                timeout: 15000,
+                                timeout: 12000,
                                 headers: { 'Content-Type': 'application/json' }
                             }
                         );
@@ -1449,7 +1462,7 @@ class CommandProcessor {
                     const response = await axios.get(
                         `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
                         { 
-                            timeout: 15000,
+                            timeout: 12000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
@@ -1481,7 +1494,7 @@ class CommandProcessor {
                 `${this.databaseUrl}/api/users/${user.id}`,
                 completeUpdateData,
                 { 
-                    timeout: 15000,
+                    timeout: 12000,
                     headers: { 'Content-Type': 'application/json' }
                 }
             );
@@ -1646,7 +1659,7 @@ class CommandProcessor {
                     const idResponse = await axios.get(
                         `${this.databaseUrl}/api/users/find-any-status-by-id/${identifier}`,
                         { 
-                            timeout: 15000,
+                            timeout: 12000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
@@ -1662,7 +1675,7 @@ class CommandProcessor {
                         const phoneResponse = await axios.get(
                             `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
                             { 
-                                timeout: 15000,
+                                timeout: 12000,
                                 headers: { 'Content-Type': 'application/json' }
                             }
                         );
@@ -1682,7 +1695,7 @@ class CommandProcessor {
                     const response = await axios.get(
                         `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
                         { 
-                            timeout: 15000,
+                            timeout: 12000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
@@ -1792,7 +1805,7 @@ class CommandProcessor {
                     const idResponse = await axios.get(
                         `${this.databaseUrl}/api/users/find-any-status-by-id/${identifier}`,
                         { 
-                            timeout: 15000,
+                            timeout: 12000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
@@ -1808,7 +1821,7 @@ class CommandProcessor {
                         const phoneResponse = await axios.get(
                             `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
                             { 
-                                timeout: 15000,
+                                timeout: 12000,
                                 headers: { 'Content-Type': 'application/json' }
                             }
                         );
@@ -1828,7 +1841,7 @@ class CommandProcessor {
                     const response = await axios.get(
                         `${this.databaseUrl}/api/users/find-any-status/${identifier}`,
                         { 
-                            timeout: 15000,
+                            timeout: 12000,
                             headers: { 'Content-Type': 'application/json' }
                         }
                     );
@@ -1866,7 +1879,7 @@ class CommandProcessor {
                 `${this.databaseUrl}/api/users/${user.id}`,
                 completeUpdateData,
                 { 
-                    timeout: 15000,
+                    timeout: 12000,
                     headers: { 'Content-Type': 'application/json' }
                 }
             );
@@ -2038,7 +2051,7 @@ class CommandProcessor {
                     removeAuth: true,    // Eliminar archivos de autenticación
                     phone: agent.telefono
                 },
-                { timeout: 15000 }
+                { timeout: 8000 }
             );
             
             if (response.data.success) {
@@ -2098,7 +2111,7 @@ Para conectar tu sesión de WhatsApp al sistema, sigue estos pasos:
                         to: agent.telefono,
                         message: welcomeMessage
                     },
-                    { timeout: 15000 }
+                    { timeout: 12000 }
                 );
                 
                 if (sendResponse.data.success) {

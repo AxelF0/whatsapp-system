@@ -4,7 +4,7 @@ class MessageAnalyzer {
     constructor(userValidator) {
         this.userValidator = userValidator;
         // Número del sistema (con API oficial) - cambiar por tu número real
-        this.systemNumber = process.env.SYSTEM_WHATSAPP_NUMBER || '59180000000';
+        this.systemNumber = process.env.SYSTEM_WHATSAPP_NUMBER || '59171337051';
     }
 
     async analyzeMessage(messageData) {
@@ -34,37 +34,79 @@ class MessageAnalyzer {
                 return analysis;
             }
 
-            // Si es whatsapp-web y el TO es el sistema
-            if (messageData.source === 'whatsapp-web') {
-                // Intentar validar si es usuario del sistema
-                const userValidation = await this.userValidator.validateUser(messageData.from);
+            // Si es whatsapp-web-agent (cliente hablando a agente)
+            if (messageData.source === 'whatsapp-web-agent') {
+                console.log(`🔍 Mensaje de WhatsApp Web Agent detectado: cliente → agente`);
+                
+                // NO validar usuario - es un cliente hablando al agente
+                console.log('📞 Cliente consultando al agente, analizando consulta...');
+                
+                // Analizar si es consulta inmobiliaria
+                const queryAnalysis = this.analyzeClientQuery(messageData.body);
+                
+                analysis.type = 'client_query';
+                analysis.description = 'Cliente consultando sobre propiedades';
+                analysis.clientPhone = messageData.from;
+                analysis.agentPhone = messageData.to; // El agente que debe responder
+                analysis.requiresIA = queryAnalysis.isRealEstateQuery;
+                analysis.requiresBackend = !queryAnalysis.isRealEstateQuery;
+                analysis.queryAnalysis = queryAnalysis;
 
-                if (userValidation.isValid) {
-                    console.log('✅ Usuario validado como agente/gerente');
-                    analysis.type = 'system_command';
-                    analysis.description = `${userValidation.userData.cargo_nombre} enviando comando`;
-                    analysis.userPhone = messageData.from;
-                    analysis.userData = userValidation.userData;
-                    analysis.requiresBackend = true;
-                    analysis.requiresIA = false;
-                } else {
-                    // TODO: Temporalmente deshabilitado el flujo cliente-agente
-                    // console.log('❌ No es usuario del sistema, tratando como cliente');
-                    // analysis.type = 'client_query';
-                    // analysis.description = 'Cliente consultando';
-                    // analysis.clientPhone = messageData.from;
-                    // analysis.agentPhone = messageData.to;
-                    // analysis.requiresIA = true;
-                    // analysis.requiresBackend = false;
+                return analysis;
+            }
+            
+            // Si es whatsapp-web (agente/gerente hablando al sistema)
+            if (messageData.source === 'whatsapp-web') {
+                console.log(`🔍 Mensaje de WhatsApp Web detectado: usuario → sistema`);
+                
+                // VALIDAR SOLO si el mensaje es para el número del sistema
+                if (messageData.to === this.systemNumber) {
+                    console.log(`📞 Mensaje dirigido al sistema (${this.systemNumber}), validando usuario...`);
                     
-                    // Por ahora, rechazar mensajes de no-usuarios
-                    throw new Error('Número no autorizado para usar el sistema');
+                    // Intentar validar si es usuario del sistema
+                    console.log(`🔍 Validando usuario: ${messageData.from}`);
+                    const userValidation = await this.userValidator.validateUser(messageData.from);
+
+                    if (userValidation.isValid) {
+                        console.log('✅ Usuario validado como agente/gerente');
+                        analysis.type = 'system_command';
+                        analysis.description = `${userValidation.userData.cargo_nombre} enviando comando`;
+                        analysis.userPhone = messageData.from;
+                        analysis.userData = userValidation.userData;
+                        analysis.requiresBackend = true;
+                        analysis.requiresIA = false;
+                    } else {
+                        console.log('❌ Usuario no válido para comandos del sistema');
+                        analysis.type = 'unauthorized';
+                        analysis.description = 'Usuario no autorizado';
+                        analysis.requiresBackend = false;
+                        analysis.requiresIA = false;
+                    }
+                } else {
+                    console.log(`📱 Mensaje NO dirigido al sistema (va a: ${messageData.to}), tratando como consulta cliente`);
+                    
+                    // Tratar como consulta de cliente sin validación
+                    const queryAnalysis = this.analyzeClientQuery(messageData.body);
+                    
+                    analysis.type = 'client_query';
+                    analysis.description = 'Cliente consultando sobre propiedades';
+                    analysis.clientPhone = messageData.from;
+                    analysis.agentPhone = messageData.to;
+                    analysis.requiresIA = queryAnalysis.isRealEstateQuery;
+                    analysis.requiresBackend = !queryAnalysis.isRealEstateQuery;
+                    analysis.queryAnalysis = queryAnalysis;
                 }
 
                 return analysis;
             }
 
-            // Resto del código...
+            // Si no es ningún caso específico, es mensaje genérico
+            console.log('❓ Mensaje no clasificado, tratando como genérico');
+            analysis.type = 'generic';
+            analysis.description = 'Mensaje genérico no clasificado';
+            analysis.requiresBackend = false;
+            analysis.requiresIA = false;
+            
             return analysis;
 
         } catch (error) {
@@ -73,32 +115,108 @@ class MessageAnalyzer {
         }
     }
 
-    // TODO: Temporalmente deshabilitado el análisis de consultas de clientes
-    /*
-    // Analizar consulta de cliente (para IA)
+    // Analizar consulta de cliente para determinar si necesita IA
     analyzeClientQuery(messageBody) {
-        const analysis = {
-            hasGreeting: this.containsGreeting(messageBody),
-            hasPropertyRequest: this.containsPropertyRequest(messageBody),
-            hasPriceRange: this.containsPriceRange(messageBody),
-            hasLocationPreference: this.containsLocation(messageBody),
-            intent: 'unknown'
-        };
-
-        // Determinar intención principal
-        if (analysis.hasPropertyRequest) {
-            analysis.intent = 'property_search';
-        } else if (analysis.hasGreeting && !analysis.hasPropertyRequest) {
-            analysis.intent = 'greeting';
-        } else if (messageBody.toLowerCase().includes('ayuda') || messageBody.toLowerCase().includes('help')) {
-            analysis.intent = 'help_request';
-        } else {
-            analysis.intent = 'general_query';
+        if (!messageBody || messageBody.trim().length === 0) {
+            return {
+                isRealEstateQuery: false,
+                queryType: 'empty',
+                confidence: 0
+            };
         }
 
-        return analysis;
+        const body = messageBody.toLowerCase().trim();
+        
+        // Palabras clave inmobiliarias
+        const realEstateKeywords = [
+            // Tipos de propiedad
+            'casa', 'casas', 'departamento', 'departamentos', 'terreno', 'terrenos',
+            'propiedad', 'propiedades', 'inmueble', 'inmuebles', 'lote', 'lotes',
+            
+            // Operaciones
+            'venta', 'vender', 'comprar', 'compra', 'alquiler', 'alquilar', 'rentar',
+            'arrendar', 'inversión', 'invertir',
+            
+            // Ubicaciones (genéricas)
+            'zona', 'ubicacion', 'ubicación', 'barrio', 'sector', 'área',
+            'norte', 'sur', 'este', 'oeste', 'centro', 'equipetrol',
+            
+            // Características
+            'dormitorio', 'dormitorios', 'habitacion', 'habitaciones', 'baño', 'baños',
+            'superficie', 'metros', 'm2', 'garage', 'jardín', 'jardin', 'piscina',
+            
+            // Precios y financiamiento
+            'precio', 'precios', 'costo', 'costos', 'valor', 'cuanto', 'cuánto',
+            'financiamiento', 'credito', 'crédito', 'hipoteca', 'anticipo',
+            
+            // Consultas típicas
+            'disponible', 'disponibles', 'mostrar', 'ver', 'visita', 'cita',
+            'información', 'informacion', 'detalles', 'caracteristicas',
+            'remaxi', 'inmobiliaria'
+        ];
+        
+        // Saludos que no son consultas inmobiliarias
+        const greetings = ['hola', 'buenas', 'buenos dias', 'buenas tardes', 'saludos'];
+        
+        // Contar coincidencias
+        let keywordMatches = 0;
+        let greetingMatches = 0;
+        
+        for (const keyword of realEstateKeywords) {
+            if (body.includes(keyword)) {
+                keywordMatches++;
+            }
+        }
+        
+        for (const greeting of greetings) {
+            if (body.includes(greeting)) {
+                greetingMatches++;
+            }
+        }
+        
+        // Determinar tipo de consulta
+        let queryType = 'other';
+        let isRealEstateQuery = false;
+        let confidence = 0;
+        
+        if (keywordMatches >= 2) {
+            // Al menos 2 palabras clave inmobiliarias
+            isRealEstateQuery = true;
+            confidence = Math.min(0.9, 0.3 + (keywordMatches * 0.15));
+            
+            if (body.includes('precio') || body.includes('cuanto')) {
+                queryType = 'price_inquiry';
+            } else if (body.includes('venta') || body.includes('comprar')) {
+                queryType = 'sale_inquiry';
+            } else if (body.includes('alquiler') || body.includes('rentar')) {
+                queryType = 'rental_inquiry';
+            } else if (body.includes('zona') || body.includes('ubicacion')) {
+                queryType = 'location_inquiry';
+            } else {
+                queryType = 'property_inquiry';
+            }
+        } else if (keywordMatches === 1 && greetingMatches === 0) {
+            // 1 palabra clave pero sin saludos
+            isRealEstateQuery = true;
+            confidence = 0.6;
+            queryType = 'general_inquiry';
+        } else if (greetingMatches > 0 && keywordMatches === 0) {
+            // Solo saludo
+            isRealEstateQuery = true; // Lo enviamos a IA para respuesta amigable
+            confidence = 0.4;
+            queryType = 'greeting';
+        }
+        
+        console.log(`🤖 Análisis IA: "${body.substring(0, 30)}..." -> ${isRealEstateQuery ? 'SI' : 'NO'} (${confidence.toFixed(2)})`);
+        
+        return {
+            isRealEstateQuery,
+            queryType,
+            confidence,
+            keywordMatches,
+            detectedKeywords: realEstateKeywords.filter(kw => body.includes(kw))
+        };
     }
-    */
 
     // Analizar comando de sistema (para Backend)
     analyzeSystemCommand(messageBody) {

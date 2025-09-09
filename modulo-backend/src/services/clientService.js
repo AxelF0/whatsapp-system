@@ -13,7 +13,8 @@ class ClientService {
             telefono: Joi.string().pattern(/^\+?[0-9]{8,15}$/).required(),
             email: Joi.string().email().allow('', null),
             preferencias: Joi.string().max(500).allow(''),
-            estado: Joi.number().valid(0, 1).default(1)
+            estado: Joi.number().valid(0, 1).default(1),
+            agente_id: Joi.number().integer().positive().allow(null).optional()
         });
     }
 
@@ -139,27 +140,48 @@ class ClientService {
         }
     }
 
-    // Listar todos los clientes
+    // Listar clientes activos solo del agente
     async list(filters = {}) {
         console.log('📋 Listando clientes');
-
         try {
+            let agente_id = filters.agente_id || null;
             const response = await axios.get(
                 `${this.databaseUrl}/api/clients`,
                 {
-                    params: filters,
+                    params: { ...(agente_id ? { agente_id } : {}) },
                     timeout: 10000
                 }
             );
-
             if (response.data.success) {
                 return response.data.data;
             } else {
                 return [];
             }
-
         } catch (error) {
             console.error('❌ Error listando clientes:', error.message);
+            return [];
+        }
+    }
+
+    // Listar clientes inactivos solo del agente
+    async listInactive(filters = {}) {
+        console.log('📋 Listando clientes inactivos');
+        try {
+            let agente_id = filters.agente_id || null;
+            const response = await axios.get(
+                `${this.databaseUrl}/api/clients/inactive`,
+                {
+                    params: { ...(agente_id ? { agente_id } : {}) },
+                    timeout: 10000
+                }
+            );
+            if (response.data.success) {
+                return response.data.data;
+            } else {
+                return [];
+            }
+        } catch (error) {
+            console.error('❌ Error listando clientes inactivos:', error.message);
             return [];
         }
     }
@@ -185,26 +207,6 @@ class ClientService {
         } catch (error) {
             console.error('❌ Error actualizando preferencias:', error.message);
             throw error;
-        }
-    }
-
-    // Obtener historial del cliente
-    async getHistory(clientId) {
-        console.log('📜 Obteniendo historial del cliente:', clientId);
-
-        try {
-            // Por ahora simulamos el historial
-            // En producción esto vendría de MongoDB
-            return {
-                clientId,
-                interactions: [],
-                properties_viewed: [],
-                visits_scheduled: []
-            };
-
-        } catch (error) {
-            console.error('❌ Error obteniendo historial:', error.message);
-            return null;
         }
     }
 
@@ -266,14 +268,16 @@ class ClientService {
     }
 
     // Buscar cliente por ID o teléfono (cualquier estado)
-    async findClientByIdOrPhone(identifier) {
-        console.log('🔍 Buscando cliente por ID o teléfono:', identifier);
+    async findClientByIdOrPhone(identifier, agente_id = null) {
+        console.log('🔍 Buscando cliente por ID o teléfono:', identifier, 'para agente:', agente_id);
 
         try {
-            const response = await axios.get(
-                `${this.databaseUrl}/api/clients/find/${encodeURIComponent(identifier)}`,
-                { timeout: 10000 }
-            );
+            let url = `${this.databaseUrl}/api/clients/find/${encodeURIComponent(identifier)}`;
+            if (agente_id) {
+                url += `?agente_id=${agente_id}`;
+            }
+            
+            const response = await axios.get(url, { timeout: 10000 });
 
             if (response.data.success) {
                 return response.data.data;

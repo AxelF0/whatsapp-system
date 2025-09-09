@@ -5,7 +5,7 @@ const axios = require('axios');
 class WhatsAppConnector {
     constructor() {
         this.whatsappWebUrl = process.env.WHATSAPP_URL || 'http://localhost:3001';
-        this.timeout = 30000; // 30 segundos
+        this.timeout = 8000; // 8 segundos optimizado para WhatsApp
     }
 
     // Enviar mensaje vía WhatsApp-Web
@@ -13,17 +13,24 @@ class WhatsAppConnector {
         console.log('📱 Enviando vía WhatsApp-Web:', {
             type: messageData.type || 'client',
             agent: messageData.agentPhone,
-            to: messageData.to
+            to: messageData.to,
+            hasMessage: !!messageData.message && messageData.message.trim().length > 0
         });
 
         try {
+            // Validar que el mensaje no esté vacío
+            if (!messageData.message || messageData.message.trim().length === 0) {
+                console.log('⚠️ Mensaje vacío detectado, saltando envío para evitar spam');
+                throw new Error('Mensaje vacío - envío saltado');
+            }
+
             // Formatear número de destino
             const cleanTo = this.cleanPhoneNumber(messageData.to);
 
             // Preparar request para WhatsApp-Web
             const requestData = {
                 to: cleanTo,
-                message: messageData.message
+                message: messageData.message.trim()
             };
 
             // Agregar archivos multimedia si existen
@@ -35,9 +42,15 @@ class WhatsAppConnector {
             }
 
             // Determinar la ruta correcta según el tipo de mensaje
-            const endpoint = messageData.type === 'system'
-                ? `${this.whatsappWebUrl}/api/system/send`
-                : `${this.whatsappWebUrl}/api/sessions/${encodeURIComponent(messageData.agentPhone)}/send`;
+            let endpoint;
+            if (messageData.type === 'system') {
+                endpoint = `${this.whatsappWebUrl}/api/system/send`;
+            } else {
+                // Para mensajes de cliente, usar endpoint de agente
+                endpoint = `${this.whatsappWebUrl}/api/agent/send`;
+                // Agregar información del agente en el requestData
+                requestData.agentPhone = messageData.agentPhone;
+            }
 
             // Enviar a través del módulo WhatsApp
             const response = await axios.post(
@@ -130,17 +143,16 @@ class WhatsAppConnector {
         // Remover @c.us si existe
         let cleaned = phoneNumber.replace('@c.us', '');
 
-        // Remover caracteres no numéricos excepto +
-        cleaned = cleaned.replace(/[^\d+]/g, '');
+        // Remover TODOS los caracteres no numéricos (incluyendo +)
+        cleaned = cleaned.replace(/\D/g, '');
 
-        // Asegurar formato internacional
-        if (!cleaned.startsWith('+')) {
-            // Asumir Bolivia si no tiene código de país
-            if (cleaned.startsWith('591')) {
-                cleaned = '+' + cleaned;
-            } else if (cleaned.length === 8) {
-                cleaned = '+591' + cleaned;
-            }
+        // NO agregar + para endpoints de WhatsApp (esperan solo números)
+        // Asegurar formato correcto de Bolivia
+        if (cleaned.startsWith('591')) {
+            return cleaned; // Ya tiene código de país
+        } else if (cleaned.length === 8) {
+            // Número local, agregar código de país SIN +
+            return '591' + cleaned;
         }
 
         return cleaned;

@@ -4,11 +4,14 @@ const axios = require('axios');
 
 class SystemRouter {
     constructor() {
-        this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3004';
-        this.responsesUrl = process.env.RESPONSES_URL || 'http://localhost:3005';
-        this.timeout = 15000; // 15 segundos
-        this.maxRetries = 3;
-        this.retryDelay = 1000;
+        this.backendUrl = process.env.BACKEND_URL || 'http://127.0.0.1:3004';
+        this.responsesUrl = process.env.RESPONSES_URL || 'http://127.0.0.1:3005';
+        this.iaUrl = process.env.IA_URL || 'http://127.0.0.1:3007';
+        this.timeout = 10000; // 10 segundos - optimizado para WhatsApp
+        this.maxRetries = 2;    // Menos reintentos, más rápido
+        this.retryDelay = 500;  // Delay más corto entre reintentos
+        // Cache para evitar envíos duplicados
+        this.sentMessages = new Map();
     }
 
     // Limpiar número de teléfono
@@ -327,7 +330,7 @@ class SystemRouter {
                     message: message,
                     responseType: 'system'
                 },
-                { timeout: 30000 }
+                { timeout: 8000 }
             );
 
             console.log('✅ Respuesta enviada al usuario vía WhatsApp');
@@ -742,7 +745,204 @@ class SystemRouter {
             results.responses = false;
         }
 
+        // Verificar módulo IA
+        try {
+            const response = await axios.get(`${this.iaUrl}/api/health`, { timeout: 5000 });
+            results.ia = response.data.status === 'healthy';
+        } catch (error) {
+            results.ia = false;
+        }
+
         return results;
+    }
+
+    // Enviar consulta al módulo IA
+    async sendToIA(queryData, attempt = 1) {
+        try {
+            console.log('🤖 Enviando consulta al módulo IA:', {
+                from: queryData.from_phone,
+                question: queryData.question?.substring(0, 50) + '...'
+            });
+
+            const iaRequest = {
+                question: queryData.question,
+                from_phone: queryData.from_phone,
+                to_phone: queryData.to_phone,
+                conversation_history: queryData.conversation_history || '',
+                source: 'whatsapp'
+            };
+
+            console.log(`📡 Enviando a: ${this.iaUrl}/api/query`);
+            const startTime = Date.now();
+            const response = await axios.post(
+                `${this.iaUrl}/api/query`,
+                iaRequest,
+                {
+                    timeout: this.timeout,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Source': 'processing-module'
+                    }
+                }
+            );
+
+            const iaResponse = response.data;
+            const responseTime = Date.now() - startTime;
+            console.log(`⏱️ TIEMPO RESPUESTA IA: ${responseTime}ms`);
+            
+            // 🔍 LOG DETALLADO - PROCESAMIENTO RECIBE IA
+            console.log('🔍 PROCESAMIENTO PASO 1 - Respuesta IA recibida:');
+            console.log(`   ✅ success: ${iaResponse.success}`);
+            console.log(`   📝 answer: '${iaResponse.answer?.substring(0, 100)}...' (len: ${iaResponse.answer?.length || 0})`);
+            console.log(`   📊 used_context: ${iaResponse.used_context}`);
+            console.log(`   🎯 requires_agent_attention: ${iaResponse.requires_agent_attention}`);
+
+            if (iaResponse.success) {
+                // Preparar respuesta para módulo de respuestas
+                // IMPORTANTE: La respuesta debe ir desde el AGENTE al CLIENTE
+                const responseForProcessing = {
+                    to: queryData.from_phone, // Cliente que hizo la consulta
+                    from: queryData.to_phone, // Agente que debe responder 
+                    message: iaResponse.answer,
+                    type: 'text',
+                    responseMode: 'agent-to-client', // Especificar que es desde agente
+                    metadata: {
+                        ...iaResponse.metadata,
+                        original_query: queryData.question,
+                        requires_agent_attention: iaResponse.requires_agent_attention,
+                        suggested_actions: iaResponse.suggested_actions,
+                        source: 'ia-module',
+                        agent_phone: queryData.to_phone
+                    }
+                };
+
+                // 🔍 LOG DETALLADO - PROCESAMIENTO PREPARA ENVÍO
+                console.log('🔍 PROCESAMIENTO PASO 2 - Preparando respuesta para envío:');
+                console.log(`   📞 to: ${responseForProcessing.to}`);
+                console.log(`   👤 from: ${responseForProcessing.from}`);
+                console.log(`   📝 message: '${responseForProcessing.message?.substring(0, 100)}...' (len: ${responseForProcessing.message?.length || 0})`);
+                console.log(`   📋 type: ${responseForProcessing.type}`);
+                console.log(`   🎯 responseMode: ${responseForProcessing.responseMode}`);
+
+                // Enviar al módulo de respuestas para cliente (desde agente)
+                return await this.sendToClientFromAgent(responseForProcessing);
+            } else {
+                throw new Error('IA module returned error response');
+            }
+
+        } catch (error) {
+            console.error(`❌ Error enviando a IA (intento ${attempt}):`, error.message);
+
+            if (attempt < this.maxRetries) {
+                console.log(`🔄 Reintentando en ${this.retryDelay}ms... (${attempt}/${this.maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                return this.sendToIA(queryData, attempt + 1);
+            } else {
+                // Respuesta de fallback - DESDE EL AGENTE
+                const fallbackResponse = {
+                    to: queryData.from_phone, // Cliente
+                    from: queryData.to_phone, // Agente que debe responder
+                    message: 'Disculpa, el sistema de consultas no está disponible temporalmente. Te contacto personalmente en unos minutos.',
+                    type: 'text',
+                    responseMode: 'agent-to-client',
+                    metadata: {
+                        error: error.message,
+                        fallback: true,
+                        requires_agent_attention: true,
+                        agent_phone: queryData.to_phone
+                    }
+                };
+
+                return await this.sendToClientFromAgent(fallbackResponse);
+            }
+        }
+    }
+
+    // NUEVO: Enviar respuesta al cliente desde el agente
+    async sendToClientFromAgent(responseData, attempt = 1) {
+        try {
+            // Generar clave única más robusta para evitar duplicados
+            const messageKey = `${responseData.from}-${responseData.to}`;
+            const now = Date.now();
+            
+            // Anti-spam INTELIGENTE: Solo bloquear contenido duplicado
+            const contentHash = responseData.message?.substring(0, 50) || 'empty';
+            const contentKey = `${messageKey}-${contentHash}`;
+            
+            console.log(`🔍 Anti-spam check: ${contentKey.substring(0, 80)}...`);
+            
+            if (this.sentMessages.has(contentKey)) {
+                const lastSent = this.sentMessages.get(contentKey);
+                const timeDiff = now - lastSent;
+                console.log(`⏰ Último envío hace ${timeDiff}ms`);
+                
+                if (timeDiff < 10000) { // Solo 10s para contenido idéntico
+                    console.log('⏭️ Mensaje IDÉNTICO detectado, evitando spam (< 10s)');
+                    return { success: true, message: 'Anti-spam: contenido duplicado' };
+                }
+            }
+
+            console.log('👨‍💼➡️👤 Enviando respuesta al cliente desde agente:', {
+                to: responseData.to,
+                from: responseData.from,
+                message: responseData.message?.substring(0, 50) + '...'
+            });
+
+            // Limpiar cache viejo (más de 2 minutos)
+            for (const [key, timestamp] of this.sentMessages.entries()) {
+                if (now - timestamp > 120000) {
+                    this.sentMessages.delete(key);
+                }
+            }
+
+            // 🔍 LOG DETALLADO - PROCESAMIENTO ENVÍA A RESPUESTAS
+            const payloadToResponses = {
+                to: responseData.to, // Cliente
+                agentPhone: responseData.from, // Agente que responde (campo correcto)
+                message: responseData.message,
+                type: responseData.type || 'text',
+                metadata: responseData.metadata || {},
+                source: 'agent-response'
+            };
+            
+            console.log('🔍 PROCESAMIENTO PASO 3 - Enviando a módulo Respuestas:');
+            console.log(`   📡 URL: ${this.responsesUrl}/api/send/client`);
+            console.log(`   📞 to: ${payloadToResponses.to}`);
+            console.log(`   👤 agentPhone: ${payloadToResponses.agentPhone}`);
+            console.log(`   📝 message: '${payloadToResponses.message?.substring(0, 100)}...' (len: ${payloadToResponses.message?.length || 0})`);
+            console.log(`   📋 type: ${payloadToResponses.type}`);
+            console.log(`   🏷️ source: ${payloadToResponses.source}`);
+
+            // Usar endpoint específico para cliente (desde agente)
+            const response = await axios.post(
+                `${this.responsesUrl}/api/send/client`,
+                payloadToResponses,
+                {
+                    timeout: this.timeout,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Source': 'processing-module',
+                        'X-Response-Mode': 'agent-to-client'
+                    }
+                }
+            );
+
+            // ✅ SOLO registrar como enviado si el envío fue exitoso (usar clave de contenido)
+            this.sentMessages.set(contentKey, now);
+            console.log('✅ Respuesta enviada al cliente desde agente');
+            return response.data;
+
+        } catch (error) {
+            console.error(`❌ Error enviando respuesta desde agente (intento ${attempt}):`, error.message);
+
+            if (attempt < this.maxRetries) {
+                console.log(`🔄 Reintentando en ${this.retryDelay}ms... (${attempt}/${this.maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                return this.sendToClientFromAgent(responseData, attempt + 1);
+            }
+
+            throw new Error(`No se pudo enviar respuesta desde agente después de ${this.maxRetries} intentos`);
+        }
     }
 }
 

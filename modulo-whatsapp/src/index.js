@@ -29,7 +29,6 @@ const messageProcessor = new MessageProcessor();
 // Variables globales
 app.locals.sessionManager = sessionManager;
 app.locals.messageProcessor = messageProcessor;
-app.locals.gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:3000';
 app.locals.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
 app.locals.processingUrl = process.env.PROCESSING_URL || 'http://localhost:3002';
 
@@ -482,18 +481,33 @@ app.post('/api/sessions/restart-all', async (req, res) => {
 // Enviar mensaje desde el agente (al cliente)
 app.post('/api/agent/send', async (req, res) => {
     try {
-        const { to, message, mediaUrl, mediaType } = req.body;
+        const { to, message, mediaUrl, mediaType, agentPhone } = req.body;
+
+        // 🔍 LOG DETALLADO - WHATSAPP RECIBE DATOS FINALES
+        console.log('🔍 WHATSAPP PASO 1 - Datos recibidos en /api/agent/send:');
+        console.log(`   📞 to: ${to || 'UNDEFINED'}`);
+        console.log(`   📝 message: '${message ? message.substring(0, 100) + '...' : 'UNDEFINED'}' (len: ${message?.length || 0})`);
+        console.log(`   👤 agentPhone: ${agentPhone || 'UNDEFINED'}`);
+        console.log(`   🎬 mediaUrl: ${req.body.mediaUrl || 'none'}`);
+        console.log(`   📋 bodyKeys: [${Object.keys(req.body).join(', ')}]`);
 
         if (!to || !message) {
+            console.error('❌ Faltan datos requeridos:', { 
+                hasTo: !!to, 
+                hasMessage: !!message,
+                body: req.body 
+            });
             return res.status(400).json({
                 success: false,
                 error: 'Destinatario y mensaje son requeridos'
             });
         }
 
-        console.log(`📤 Enviando mensaje desde AGENTE a cliente ${to}`);
+        console.log(`📤 Enviando mensaje desde AGENTE ${agentPhone || 'default'} a cliente ${to}`);
 
-        const result = await sessionManager.sendMessage('agent', {
+        // Usar la sesión del agente específico si se proporciona, sino usar 'agent'
+        const sessionToUse = agentPhone || 'agent';
+        const result = await sessionManager.sendMessage(sessionToUse, {
             to,
             message,
             mediaUrl,
@@ -644,7 +658,6 @@ async function startMultiSessionWhatsApp() {
 
         // Configurar procesador de mensajes
         messageProcessor.configure({
-            gatewayUrl: app.locals.gatewayUrl,
             databaseUrl: app.locals.databaseUrl,
             processingUrl: app.locals.processingUrl
         });

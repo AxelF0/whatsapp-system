@@ -198,7 +198,7 @@ class MenuManager {
             session.currentAction = selectedOption.action;
             session.actionStep = 1;
             session.actionData = { userData };
-            return this.startAction(session, userRole, selectedOption.action);
+            return this.startAction(session, userRole, selectedOption.action, userData);
         }
 
         // Si tiene un siguiente menú, mostrarlo
@@ -252,7 +252,7 @@ class MenuManager {
     }
 
     // Iniciar una acción específica
-    async startAction(session, userRole, action) {
+    async startAction(session, userRole, action, userData = null) {
         console.log(`🎯 Iniciando acción: ${action}`);
         
         switch (action) {
@@ -277,7 +277,8 @@ class MenuManager {
                     message: '📋 Obteniendo lista de clientes...',
                     executeCommand: {
                         type: 'list_clients',
-                        parameters: {}
+                        parameters: {},
+                        userData: session.actionData?.userData
                     }
                 };
 
@@ -597,7 +598,8 @@ class MenuManager {
                         message: '📋 Obteniendo lista de clientes...',
                         executeCommand: {
                             type: 'list_clients',
-                            parameters: { forSelection: true }
+                            parameters: { forSelection: true },
+                            userData: session.actionData?.userData
                         }
                     };
                 }
@@ -1695,7 +1697,8 @@ class MenuManager {
                         message: '📋 Obteniendo lista de clientes...',
                         executeCommand: {
                             type: 'list_clients',
-                            parameters: { forSelection: true }
+                            parameters: { forSelection: true },
+                            userData: session.actionData?.userData
                         }
                     };
                 }
@@ -1745,7 +1748,8 @@ class MenuManager {
                         message: '📋 Obteniendo clientes eliminados...',
                         executeCommand: {
                             type: 'list_clients_inactive',
-                            parameters: { forSelection: true }
+                            parameters: { forSelection: true },
+                            userData: session.actionData?.userData
                         }
                     };
                 }
