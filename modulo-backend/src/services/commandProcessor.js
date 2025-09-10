@@ -1,6 +1,8 @@
 // servidor/modulo-backend/src/services/commandProcessor.js
 
 const axios = require('axios');
+const path = require('path');
+const fs = require('fs').promises;
 const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
 
 class CommandProcessor {
@@ -284,6 +286,40 @@ class CommandProcessor {
                 example: 'BUSCAR ESTADO disponible',
                 requiredRole: ['agente', 'gerente'],
                 handler: this.handleSearchByStatus.bind(this)
+            },
+
+            // Comandos de envío masivo
+            'broadcast_clients': {
+                name: 'Envío Masivo a Clientes',
+                description: 'Envía mensaje masivo a todos los clientes del agente',
+                format: 'ENVIAR CLIENTES [mensaje]',
+                example: 'ENVIAR CLIENTES Nueva propiedad disponible en Las Palmas',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleBroadcastClients.bind(this)
+            },
+            'broadcast_clients_filtered': {
+                name: 'Envío Masivo Filtrado',
+                description: 'Envía mensaje masivo a clientes con filtros específicos',
+                format: 'ENVIAR CLIENTES FILTRADOS [filtro] [mensaje]',
+                example: 'ENVIAR CLIENTES FILTRADOS activos Nueva propiedad de 3 dormitorios',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleBroadcastClientsFiltered.bind(this)
+            },
+            'broadcast_clients_custom': {
+                name: 'Envío Masivo Personalizado',
+                description: 'Envía mensaje masivo a clientes seleccionados manualmente',
+                format: 'Selección manual desde menú interactivo',
+                example: 'Usado desde menú: Opción 2 - Enviar a Clientes Filtrados',
+                requiredRole: ['agente', 'gerente'],
+                handler: this.handleBroadcastClientsCustom.bind(this)
+            },
+            'broadcast_agents': {
+                name: 'Envío Masivo a Agentes',
+                description: 'Envía mensaje masivo a todos los agentes (solo gerentes)',
+                format: 'ENVIAR AGENTES [mensaje]',
+                example: 'ENVIAR AGENTES Reunión de equipo mañana a las 10:00',
+                requiredRole: ['gerente'],
+                handler: this.handleBroadcastAgents.bind(this)
             }
         };
     }
@@ -664,8 +700,8 @@ class CommandProcessor {
             } else if (mimeType === 'application/pdf' || fileName.endsWith('.pdf')) {
                 organized.pdfs.push(file);
             } else if (fileName.match(/\.(doc|docx)$/)) {
-                // Word files will be converted to PDF
-                organized.pdfs.push({...file, needsConversion: true, originalType: 'word'});
+                // Word files go to docs folder (not converted to PDF)
+                organized.documents.push({...file, fileType: 'word'});
             } else if (mimeType.startsWith('video/') || fileName.match(/\.(mp4|avi|mov|wmv|flv|webm)$/)) {
                 organized.videos.push(file);
             } else if (fileName.match(/\.(txt|rtf|odt|xlsx|xls|ppt|pptx)$/)) {
@@ -690,56 +726,73 @@ class CommandProcessor {
         };
 
         try {
-            // Procesar PDFs (incluye conversiones de Word)
+            // Asegurar que todas las carpetas de destino existan
+            await this.ensureDirectoriesExist();
+
+            // Procesar PDFs - van al módulo de IA
             for (const file of organizedFiles.pdfs) {
-                if (file.needsConversion) {
-                    const convertedFile = await this.convertWordToPdf(file);
-                    processed.pdfs.push({
-                        ...convertedFile,
-                        savedTo: 'modulo-ia/data/pdfs/',
-                        converted: true
-                    });
-                    processed.conversions.push({
-                        original: file.fileName,
-                        converted: convertedFile.fileName
+                const destinationPath = path.resolve(__dirname, '../../../modulo-ia/data/pdfs');
+                processed.pdfs.push({
+                    ...file,
+                    savedTo: '../modulo-ia/data/pdfs/',
+                    fullPath: destinationPath,
+                    category: 'pdf_document'
+                });
+            }
+
+            // Procesar imágenes - van al backend/files/images/
+            for (const file of organizedFiles.images) {
+                const destinationPath = path.resolve(__dirname, '../../files/images');
+                processed.images.push({
+                    ...file,
+                    savedTo: './files/images/',
+                    fullPath: destinationPath,
+                    category: 'image_file'
+                });
+            }
+
+            // Procesar documentos Word y otros docs
+            for (const file of organizedFiles.documents) {
+                if (file.fileType === 'word') {
+                    // Word docs van al módulo de IA
+                    const destinationPath = path.resolve(__dirname, '../../../modulo-ia/data/docs');
+                    processed.documents.push({
+                        ...file,
+                        savedTo: '../modulo-ia/data/docs/',
+                        fullPath: destinationPath,
+                        category: 'word_document'
                     });
                 } else {
-                    processed.pdfs.push({
+                    // Otros documentos van a backend/files/others/
+                    const destinationPath = path.resolve(__dirname, '../../files/others');
+                    processed.documents.push({
                         ...file,
-                        savedTo: 'modulo-ia/data/pdfs/'
+                        savedTo: './files/others/',
+                        fullPath: destinationPath,
+                        category: 'general_document'
                     });
                 }
             }
 
-            // Procesar imágenes
-            for (const file of organizedFiles.images) {
-                processed.images.push({
-                    ...file,
-                    savedTo: 'media/images/'
-                });
-            }
-
-            // Procesar documentos
-            for (const file of organizedFiles.documents) {
-                processed.documents.push({
-                    ...file,
-                    savedTo: 'media/documents/'
-                });
-            }
-
-            // Procesar videos
+            // Procesar videos - van al backend/files/videos/
             for (const file of organizedFiles.videos) {
+                const destinationPath = path.resolve(__dirname, '../../files/videos');
                 processed.videos.push({
                     ...file,
-                    savedTo: 'media/videos/'
+                    savedTo: './files/videos/',
+                    fullPath: destinationPath,
+                    category: 'video_file'
                 });
             }
 
-            // Procesar otros
+            // Procesar otros - van al backend/files/others/
             for (const file of organizedFiles.others) {
+                const destinationPath = path.resolve(__dirname, '../../files/others');
                 processed.others.push({
                     ...file,
-                    savedTo: 'media/others/'
+                    savedTo: './files/others/',
+                    fullPath: destinationPath,
+                    category: 'other_file'
                 });
             }
 
@@ -749,6 +802,34 @@ class CommandProcessor {
         }
 
         return processed;
+    }
+
+    // Asegurar que todas las carpetas de destino existan
+    async ensureDirectoriesExist() {
+        const directories = [
+            // Módulo IA - PDFs
+            path.resolve(__dirname, '../../../modulo-ia/data/pdfs'),
+            // Módulo IA - Documentos Word
+            path.resolve(__dirname, '../../../modulo-ia/data/docs'),
+            // Backend - Imágenes
+            path.resolve(__dirname, '../../files/images'),
+            // Backend - Videos
+            path.resolve(__dirname, '../../files/videos'),
+            // Backend - Otros archivos
+            path.resolve(__dirname, '../../files/others')
+        ];
+
+        for (const dir of directories) {
+            try {
+                await fs.mkdir(dir, { recursive: true });
+                console.log(`📁 Directorio asegurado: ${dir}`);
+            } catch (error) {
+                if (error.code !== 'EEXIST') {
+                    console.error(`❌ Error creando directorio ${dir}:`, error.message);
+                    throw error;
+                }
+            }
+        }
     }
 
     // Convertir Word a PDF
@@ -782,12 +863,19 @@ class CommandProcessor {
 
         const summary = [];
         
-        if (counts.images > 0) summary.push(`📷 ${counts.images} imagen(es)`);
-        if (counts.documents > 0) summary.push(`📄 ${counts.documents} documento(s)`);
-        if (counts.videos > 0) summary.push(`🎥 ${counts.videos} video(s)`);
-        if (counts.pdfs > 0) summary.push(`📑 ${counts.pdfs} PDF(s)`);
-        if (counts.others > 0) summary.push(`📁 ${counts.others} otro(s)`);
-        if (counts.conversions > 0) summary.push(`🔄 ${counts.conversions} conversión(es) Word→PDF`);
+        if (counts.images > 0) summary.push(`📷 ${counts.images} imagen(es) → Backend/files/images/`);
+        if (counts.pdfs > 0) summary.push(`📑 ${counts.pdfs} PDF(s) → Módulo IA/data/pdfs/`);
+        if (counts.videos > 0) summary.push(`🎥 ${counts.videos} video(s) → Backend/files/videos/`);
+        
+        if (counts.documents > 0) {
+            const wordDocs = processedFiles.documents.filter(d => d.category === 'word_document').length;
+            const otherDocs = processedFiles.documents.filter(d => d.category === 'general_document').length;
+            
+            if (wordDocs > 0) summary.push(`📄 ${wordDocs} documento(s) Word → Módulo IA/data/docs/`);
+            if (otherDocs > 0) summary.push(`📋 ${otherDocs} documento(s) general → Backend/files/others/`);
+        }
+        
+        if (counts.others > 0) summary.push(`📁 ${counts.others} archivo(s) otros → Backend/files/others/`);
 
         return summary.join('\n') || '• Sin archivos procesados';
     }
@@ -797,22 +885,30 @@ class CommandProcessor {
         const locations = [];
         
         if (processedFiles.pdfs.length > 0) {
-            locations.push(`📑 PDFs → modulo-ia/data/pdfs/`);
+            locations.push(`📑 PDFs (${processedFiles.pdfs.length}) → modulo-ia/data/pdfs/`);
         }
         if (processedFiles.images.length > 0) {
-            locations.push(`📷 Imágenes → media/images/`);
+            locations.push(`📷 Imágenes (${processedFiles.images.length}) → modulo-backend/files/images/`);
         }
         if (processedFiles.documents.length > 0) {
-            locations.push(`📄 Documentos → media/documents/`);
+            const wordDocs = processedFiles.documents.filter(d => d.category === 'word_document').length;
+            const otherDocs = processedFiles.documents.filter(d => d.category === 'general_document').length;
+            
+            if (wordDocs > 0) {
+                locations.push(`📄 Word Docs (${wordDocs}) → modulo-ia/data/docs/`);
+            }
+            if (otherDocs > 0) {
+                locations.push(`📋 Otros Docs (${otherDocs}) → modulo-backend/files/others/`);
+            }
         }
         if (processedFiles.videos.length > 0) {
-            locations.push(`🎥 Videos → media/videos/`);
+            locations.push(`🎥 Videos (${processedFiles.videos.length}) → modulo-backend/files/videos/`);
         }
         if (processedFiles.others.length > 0) {
-            locations.push(`📁 Otros → media/others/`);
+            locations.push(`📁 Otros (${processedFiles.others.length}) → modulo-backend/files/others/`);
         }
 
-        return locations.join('\n') || '• Sin ubicaciones específicas';
+        return locations.join('\n') || '• Sin archivos procesados';
     }
 
     // Handler: Buscar Propiedades
@@ -2348,6 +2444,494 @@ Para conectar tu sesión de WhatsApp al sistema, sigue estos pasos:
             action: 'search_results',
             message: message
         };
+    }
+
+    // ==================== HANDLERS DE ENVÍO MASIVO ====================
+
+    // Handler para envío masivo a todos los clientes del agente
+    async handleBroadcastClients(commandData) {
+        console.log('📤 Procesando envío masivo a clientes del agente');
+
+        try {
+            // Obtener mensaje de diferentes fuentes (comando directo vs menú)
+            let mensaje = '';
+            
+            if (commandData.command && commandData.command.params) {
+                // Comando directo: ENVIAR CLIENTES mensaje
+                mensaje = commandData.command.params.join(' ').trim();
+            } else if (commandData.command && commandData.command.parameters && commandData.command.parameters.message) {
+                // Desde menú interactivo (executeCommand)
+                mensaje = commandData.command.parameters.message.trim();
+            } else if (commandData.actionData && commandData.actionData.mensaje) {
+                // Desde menú interactivo alternativo
+                mensaje = commandData.actionData.mensaje.trim();
+            } else if (commandData.message) {
+                // Mensaje directo
+                mensaje = commandData.message.trim();
+            }
+            
+            console.log(`🔍 DEBUG - Mensaje extraído: "${mensaje}"`);
+            console.log(`🔍 DEBUG - commandData.command:`, commandData.command);
+            
+            if (!mensaje) {
+                throw new Error('Debe especificar el mensaje a enviar');
+            }
+
+            // Validar longitud del mensaje
+            if (mensaje.length > 1000) {
+                throw new Error('El mensaje es demasiado largo (máximo 1000 caracteres)');
+            }
+
+            const agentId = commandData.user.id;
+            // Limpiar el número de teléfono del agente (quitar @c.us si existe)
+            const agentPhone = commandData.user.phone.replace('@c.us', '');
+
+            console.log(`🔍 DEBUG - agentPhone limpiado: "${agentPhone}"`);
+
+            // Verificar que el agente tenga una sesión WhatsApp activa
+            try {
+                const sessionCheckResponse = await axios.get('http://localhost:3001/api/sessions/status', { 
+                    timeout: 5000 
+                });
+                
+                const sessions = sessionCheckResponse.data?.data?.status || {};
+                const agentSession = sessions[agentPhone];
+                
+                if (!agentSession || agentSession.status !== 'ready') {
+                    throw new Error(`Tu sesión WhatsApp no está conectada. Por favor, conecta tu WhatsApp antes de enviar mensajes masivos.`);
+                }
+                
+                console.log(`✅ Sesión WhatsApp verificada para agente: ${agentPhone}`);
+            } catch (sessionError) {
+                console.error(`❌ Error verificando sesión WhatsApp: ${sessionError.message}`);
+                throw new Error(`Error de conectividad WhatsApp: ${sessionError.message}`);
+            }
+
+            // Obtener clientes del agente
+            const clients = await this.clientService.getByAgent(agentId);
+            
+            if (clients.length === 0) {
+                return {
+                    success: true,
+                    action: 'broadcast_info',
+                    message: '📋 No tienes clientes asignados para envío masivo'
+                };
+            }
+
+            // Limitar cantidad de clientes por seguridad
+            if (clients.length > 50) {
+                return {
+                    success: false,
+                    action: 'broadcast_error',
+                    message: `❌ Demasiados clientes (${clients.length}). Máximo 50 por envío masivo. Usa filtros para reducir la cantidad.`
+                };
+            }
+
+            // Preparar datos para envío masivo
+            const broadcastData = {
+                agentPhone: agentPhone,
+                message: `🏡 *REMAX EXPRESS* 🏡\n\n${mensaje}\n\n📞 Contacta conmigo para más información`,
+                delayBetweenMessages: this.calculateOptimalDelay(clients.length),
+                clients: clients
+            };
+
+            // Realizar envío masivo con mejores prácticas anti-bloqueo
+            const result = await this.performBroadcastWithAntiBlock(broadcastData);
+
+            return {
+                success: true,
+                action: 'broadcast_completed',
+                message: `✅ **Envío masivo completado**\n\n📊 **Estadísticas:**\n• Clientes objetivo: ${clients.length}\n• Mensajes enviados: ${result.sent}\n• Errores: ${result.errors}\n• Tiempo total: ${result.duration}s\n\n💡 Recomendación: Espera al menos 2 horas antes del próximo envío masivo`,
+                data: result
+            };
+
+        } catch (error) {
+            console.error('❌ Error en broadcast_clients:', error.message);
+            throw error;
+        }
+    }
+
+    // Handler para envío masivo filtrado
+    async handleBroadcastClientsFiltered(commandData) {
+        console.log('📤 Procesando envío masivo filtrado a clientes');
+
+        try {
+            let filtro = '';
+            let mensaje = '';
+            
+            if (commandData.command && commandData.command.params && commandData.command.params.length >= 2) {
+                // Comando directo: ENVIAR CLIENTES FILTRADOS [filtro] [mensaje]
+                filtro = commandData.command.params[0].toLowerCase();
+                mensaje = commandData.command.params.slice(1).join(' ').trim();
+            } else if (commandData.command && commandData.command.parameters && commandData.command.parameters.message) {
+                // Desde menú interactivo (executeCommand) - usar filtro "activos" por defecto
+                filtro = commandData.command.parameters.filter || 'activos';
+                mensaje = commandData.command.parameters.message.trim();
+            } else if (commandData.actionData) {
+                // Desde menú interactivo alternativo
+                filtro = commandData.actionData.filtro ? commandData.actionData.filtro.toLowerCase() : '';
+                mensaje = commandData.actionData.mensaje ? commandData.actionData.mensaje.trim() : '';
+            } else if (commandData.message) {
+                // Mensaje desde menú - asumir filtro "activos" por defecto
+                filtro = 'activos';
+                mensaje = commandData.message.trim();
+            }
+            
+            if (!filtro) {
+                throw new Error('Debe especificar el filtro (activos, con-email, recientes)');
+            }
+            
+            if (!mensaje) {
+                throw new Error('Debe especificar el mensaje a enviar');
+            }
+
+            const agentId = commandData.user.id;
+            // Limpiar el número de teléfono del agente (quitar @c.us si existe)
+            const agentPhone = commandData.user.phone.replace('@c.us', '');
+
+            // Obtener y filtrar clientes
+            let clients = await this.clientService.getByAgent(agentId);
+            
+            // Aplicar filtros
+            switch(filtro) {
+                case 'activos':
+                    clients = clients.filter(c => c.estado === 1);
+                    break;
+                case 'con-email':
+                    clients = clients.filter(c => c.email && c.email.trim());
+                    break;
+                case 'recientes':
+                    const unaSemanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                    clients = clients.filter(c => new Date(c.fecha_creacion) >= unaSemanaAtras);
+                    break;
+                default:
+                    throw new Error(`Filtro no válido: ${filtro}. Opciones: activos, con-email, recientes`);
+            }
+
+            if (clients.length === 0) {
+                return {
+                    success: true,
+                    action: 'broadcast_info',
+                    message: `📋 No se encontraron clientes con el filtro: ${filtro}`
+                };
+            }
+
+            if (clients.length > 30) {
+                return {
+                    success: false,
+                    action: 'broadcast_error',
+                    message: `❌ Demasiados clientes filtrados (${clients.length}). Máximo 30 para envío filtrado.`
+                };
+            }
+
+            // Preparar y realizar envío
+            const broadcastData = {
+                agentPhone: agentPhone,
+                message: `🏡 *REMAX EXPRESS* 🏡\n\n${mensaje}\n\n📞 Contacta conmigo para más información`,
+                delayBetweenMessages: this.calculateOptimalDelay(clients.length),
+                clients: clients
+            };
+
+            const result = await this.performBroadcastWithAntiBlock(broadcastData);
+
+            return {
+                success: true,
+                action: 'broadcast_completed',
+                message: `✅ **Envío filtrado completado** (${filtro})\n\n📊 **Estadísticas:**\n• Clientes objetivo: ${clients.length}\n• Mensajes enviados: ${result.sent}\n• Errores: ${result.errors}\n• Tiempo total: ${result.duration}s`,
+                data: result
+            };
+
+        } catch (error) {
+            console.error('❌ Error en broadcast_clients_filtered:', error.message);
+            throw error;
+        }
+    }
+
+    // Handler para envío masivo personalizado (clientes seleccionados manualmente)
+    async handleBroadcastClientsCustom(commandData) {
+        console.log('📤 Procesando envío masivo personalizado (clientes seleccionados)');
+
+        try {
+            // Obtener mensaje y clientes seleccionados del menú
+            let mensaje = '';
+            let selectedClients = [];
+            
+            if (commandData.command && commandData.command.parameters) {
+                // Desde menú interactivo (executeCommand)
+                mensaje = commandData.command.parameters.message ? commandData.command.parameters.message.trim() : '';
+                selectedClients = commandData.command.parameters.selectedClients || [];
+            }
+            
+            console.log(`🔍 DEBUG - Mensaje: "${mensaje}"`);
+            console.log(`🔍 DEBUG - Clientes seleccionados: ${selectedClients.length}`);
+            
+            if (!mensaje) {
+                throw new Error('Debe especificar el mensaje a enviar');
+            }
+
+            if (!selectedClients || selectedClients.length === 0) {
+                throw new Error('Debe seleccionar al menos un cliente');
+            }
+
+            // Validar longitud del mensaje
+            if (mensaje.length > 1000) {
+                throw new Error('El mensaje es demasiado largo (máximo 1000 caracteres)');
+            }
+
+            const agentId = commandData.user.id;
+            // Limpiar el número de teléfono del agente (quitar @c.us si existe)
+            const agentPhone = commandData.user.phone.replace('@c.us', '');
+
+            console.log(`🔍 DEBUG - agentPhone limpiado: "${agentPhone}"`);
+
+            // Verificar que el agente tenga una sesión WhatsApp activa
+            try {
+                const sessionCheckResponse = await axios.get('http://localhost:3001/api/sessions/status', { 
+                    timeout: 5000 
+                });
+                
+                const sessions = sessionCheckResponse.data?.data?.status || {};
+                const agentSession = sessions[agentPhone];
+                
+                if (!agentSession || agentSession.status !== 'ready') {
+                    throw new Error(`Tu sesión WhatsApp no está conectada. Por favor, conecta tu WhatsApp antes de enviar mensajes masivos.`);
+                }
+                
+                console.log(`✅ Sesión WhatsApp verificada para agente: ${agentPhone}`);
+            } catch (sessionError) {
+                console.error(`❌ Error verificando sesión WhatsApp: ${sessionError.message}`);
+                throw new Error(`Error de conectividad WhatsApp: ${sessionError.message}`);
+            }
+
+            // Limitar cantidad de clientes por seguridad
+            if (selectedClients.length > 30) {
+                return {
+                    success: false,
+                    action: 'broadcast_error',
+                    message: `❌ Demasiados clientes seleccionados (${selectedClients.length}). Máximo 30 por envío personalizado.`
+                };
+            }
+
+            // Preparar datos para envío masivo
+            const broadcastData = {
+                agentPhone: agentPhone,
+                message: `🏡 *REMAX EXPRESS* 🏡\n\n${mensaje}\n\n📞 Contacta conmigo para más información`,
+                delayBetweenMessages: this.calculateOptimalDelay(selectedClients.length),
+                clients: selectedClients
+            };
+
+            // Realizar envío masivo con mejores prácticas anti-bloqueo
+            const result = await this.performBroadcastWithAntiBlock(broadcastData);
+
+            return {
+                success: true,
+                action: 'broadcast_completed',
+                message: `✅ **Envío personalizado completado**\n\n📊 **Estadísticas:**\n• Clientes seleccionados: ${selectedClients.length}\n• Mensajes enviados: ${result.sent}\n• Errores: ${result.errors}\n• Tiempo total: ${result.duration}s\n\n💡 Recomendación: Espera al menos 2 horas antes del próximo envío masivo`,
+                data: result
+            };
+
+        } catch (error) {
+            console.error('❌ Error en broadcast_clients_custom:', error.message);
+            throw error;
+        }
+    }
+
+    // Handler para envío masivo a agentes (solo gerentes)
+    async handleBroadcastAgents(commandData) {
+        console.log('📤 Procesando envío masivo a agentes (gerente)');
+
+        try {
+            // Obtener mensaje de diferentes fuentes
+            let mensaje = '';
+            
+            if (commandData.command && commandData.command.params) {
+                // Comando directo: ENVIAR AGENTES mensaje
+                mensaje = commandData.command.params.join(' ').trim();
+            } else if (commandData.command && commandData.command.parameters && commandData.command.parameters.message) {
+                // Desde menú interactivo (executeCommand)
+                mensaje = commandData.command.parameters.message.trim();
+            } else if (commandData.actionData && commandData.actionData.mensaje) {
+                // Desde menú interactivo alternativo
+                mensaje = commandData.actionData.mensaje.trim();
+            } else if (commandData.message) {
+                // Mensaje directo desde menú
+                mensaje = commandData.message.trim();
+            }
+            
+            if (!mensaje) {
+                throw new Error('Debe especificar el mensaje a enviar');
+            }
+
+            // Limpiar el número de teléfono del gerente (quitar @c.us si existe)
+            const gerentePhone = commandData.user.phone.replace('@c.us', '');
+
+            // Obtener todos los agentes activos
+            const agents = await this.userService.list({ cargo_id: 1, estado: 1 });
+            
+            if (agents.length === 0) {
+                return {
+                    success: true,
+                    action: 'broadcast_info',
+                    message: '📋 No hay agentes activos en el sistema'
+                };
+            }
+
+            // Limitar cantidad
+            if (agents.length > 20) {
+                return {
+                    success: false,
+                    action: 'broadcast_error',
+                    message: `❌ Demasiados agentes (${agents.length}). Máximo 20 por envío masivo.`
+                };
+            }
+
+            // Preparar datos (convertir agentes a formato compatible)
+            const agentsAsClients = agents.map(agent => ({
+                nombre: agent.nombre,
+                apellido: agent.apellido,
+                telefono: agent.telefono
+            }));
+
+            const broadcastData = {
+                agentPhone: gerentePhone,
+                message: `👨‍💼 *MENSAJE GERENCIAL* 👨‍💼\n\n${mensaje}\n\n📞 Para consultas, contactar gerencia`,
+                delayBetweenMessages: this.calculateOptimalDelay(agents.length, true), // Delay mayor para comunicación gerencial
+                clients: agentsAsClients
+            };
+
+            const result = await this.performBroadcastWithAntiBlock(broadcastData);
+
+            return {
+                success: true,
+                action: 'broadcast_completed',
+                message: `✅ **Envío a equipo completado**\n\n📊 **Estadísticas:**\n• Agentes contactados: ${agents.length}\n• Mensajes enviados: ${result.sent}\n• Errores: ${result.errors}\n• Tiempo total: ${result.duration}s`,
+                data: result
+            };
+
+        } catch (error) {
+            console.error('❌ Error en broadcast_agents:', error.message);
+            throw error;
+        }
+    }
+
+    // ==================== MÉTODOS DE SOPORTE PARA ENVÍO MASIVO ====================
+
+    // Calcular delay óptimo basado en cantidad y tipo
+    calculateOptimalDelay(clientCount, isManagerial = false) {
+        // Delays más conservadores para evitar bloqueos
+        if (isManagerial) {
+            return Math.max(5000, clientCount * 200); // Mínimo 5s para comunicación gerencial
+        }
+        
+        if (clientCount <= 10) return 3000;  // 3 segundos para grupos pequeños
+        if (clientCount <= 20) return 4000;  // 4 segundos para grupos medianos  
+        if (clientCount <= 30) return 5000;  // 5 segundos para grupos grandes
+        return 6000; // 6 segundos para grupos muy grandes
+    }
+
+    // Realizar broadcast con técnicas anti-bloqueo
+    async performBroadcastWithAntiBlock(broadcastData) {
+        console.log('🛡️ Iniciando envío masivo con protección anti-bloqueo...');
+        
+        const startTime = Date.now();
+        let sent = 0;
+        let errors = 0;
+        const errorDetails = [];
+
+        try {
+            // Randomizar orden de envío para parecer más natural
+            const shuffledClients = this.shuffleArray([...broadcastData.clients]);
+            
+            // Dividir en lotes pequeños
+            const batchSize = 5;
+            const batches = this.chunkArray(shuffledClients, batchSize);
+            
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                console.log(`📦 Procesando lote ${i + 1}/${batches.length} (${batch.length} clientes)`);
+                
+                // Procesar lote con variación en timing
+                for (let j = 0; j < batch.length; j++) {
+                    const client = batch[j];
+                    
+                    try {
+                        // Limpiar el número del cliente (quitar @c.us si existe)
+                        const clientPhone = client.telefono.replace('@c.us', '');
+                        
+                        // Llamar al endpoint de envío masivo del módulo WhatsApp
+                        const response = await axios.post(
+                            'http://localhost:3001/api/agent/send',
+                            {
+                                agentPhone: broadcastData.agentPhone,
+                                to: clientPhone,
+                                message: broadcastData.message
+                            },
+                            { timeout: 15000 }
+                        );
+
+                        if (response.data.success) {
+                            sent++;
+                            console.log(`  ✅ Enviado a ${client.nombre || client.telefono}`);
+                        } else {
+                            errors++;
+                            errorDetails.push(`${client.nombre || client.telefono}: ${response.data.error}`);
+                            console.log(`  ❌ Error enviando a ${client.telefono}: ${response.data.error}`);
+                        }
+
+                    } catch (sendError) {
+                        errors++;
+                        errorDetails.push(`${client.nombre || client.telefono}: ${sendError.message}`);
+                        console.error(`  ❌ Excepción enviando a ${client.telefono}:`, sendError.message);
+                    }
+
+                    // Delay variable entre mensajes del mismo lote
+                    if (j < batch.length - 1) {
+                        const variableDelay = broadcastData.delayBetweenMessages + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, variableDelay));
+                    }
+                }
+                
+                // Pausa más larga entre lotes
+                if (i < batches.length - 1) {
+                    const batchDelay = 10000 + Math.random() * 5000; // 10-15 segundos
+                    console.log(`  ⏳ Pausa entre lotes: ${Math.round(batchDelay/1000)}s`);
+                    await new Promise(resolve => setTimeout(resolve, batchDelay));
+                }
+            }
+
+        } catch (error) {
+            console.error('❌ Error crítico en broadcast:', error.message);
+            throw error;
+        }
+
+        const duration = Math.round((Date.now() - startTime) / 1000);
+        
+        console.log(`✅ Broadcast completado: ${sent} enviados, ${errors} errores en ${duration}s`);
+        
+        return {
+            sent,
+            errors,
+            duration,
+            errorDetails: errorDetails.length > 0 ? errorDetails.slice(0, 5) : null // Solo mostrar primeros 5 errores
+        };
+    }
+
+    // Utilidades para anti-bloqueo
+    shuffleArray(array) {
+        const shuffled = [...array];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+    }
+
+    chunkArray(array, size) {
+        const chunks = [];
+        for (let i = 0; i < array.length; i += size) {
+            chunks.push(array.slice(i, i + size));
+        }
+        return chunks;
     }
 
     // ==================== MÉTODOS AUXILIARES ====================

@@ -107,6 +107,22 @@ class ClientController {
             });
         }
     }
+
+    async getByAgent(req, res) {
+        try {
+            const { agentId } = req.params;
+            const clients = await this.clientService.getByAgent(agentId);
+            res.json({
+                success: true,
+                data: clients
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
 }
 
 module.exports = ClientController;

@@ -265,6 +265,12 @@ app.delete('/api/users/:id', userController.deactivate.bind(userController));
 // Obtener rendimiento del usuario
 app.get('/api/users/:id/performance', userController.getPerformance.bind(userController));
 
+// Buscar usuario por teléfono (para envío masivo)
+app.get('/api/users/by-phone/:phone', userController.getByPhone.bind(userController));
+
+// Obtener clientes asignados a un agente (para envío masivo)
+app.get('/api/clients/by-agent/:agentId', clientController.getByAgent.bind(clientController));
+
 // ==================== RUTAS DE REPORTES ====================
 
 // Reporte diario

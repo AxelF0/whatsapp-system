@@ -339,6 +339,34 @@ class ClientService {
         }
     }
 
+    // Obtener clientes asignados a un agente específico
+    async getByAgent(agentId) {
+        console.log(`📋 Obteniendo clientes del agente ID: ${agentId}`);
+
+        try {
+            const response = await axios.get(
+                `${this.databaseUrl}/api/clients`,
+                {
+                    params: { agente_id: agentId, estado: 1 }, // Solo clientes activos
+                    timeout: 10000
+                }
+            );
+
+            if (response.data.success) {
+                const clients = response.data.data;
+                console.log(`✅ Encontrados ${clients.length} clientes para el agente ${agentId}`);
+                return clients;
+            } else {
+                console.log(`⚠️ No se encontraron clientes para el agente ${agentId}`);
+                return [];
+            }
+
+        } catch (error) {
+            console.error('❌ Error obteniendo clientes del agente:', error.message);
+            throw error;
+        }
+    }
+
     // Obtener estadísticas generales
     async getStats() {
         try {

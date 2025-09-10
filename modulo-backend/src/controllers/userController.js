@@ -101,6 +101,30 @@ class UserController {
             });
         }
     }
+
+    async getByPhone(req, res) {
+        try {
+            const { phone } = req.params;
+            const user = await this.userService.getByPhone(phone);
+            
+            if (user) {
+                res.json({
+                    success: true,
+                    data: user
+                });
+            } else {
+                res.status(404).json({
+                    success: false,
+                    error: `Usuario con teléfono ${phone} no encontrado`
+                });
+            }
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
 }
 
 module.exports = UserController;

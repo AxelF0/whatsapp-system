@@ -62,7 +62,7 @@ class MenuManager {
                 title: '📢 *ENVÍO MASIVO*',
                 options: [
                     { id: '1', label: 'Enviar a Todos los Clientes', action: 'BROADCAST_CLIENTS' },
-                    { id: '2', label: 'Enviar a Clientes Filtrados', action: 'BROADCAST_FILTERED' },
+                    { id: '2', label: 'Seleccionar Clientes Específicos', action: 'BROADCAST_FILTERED' },
                     { id: '3', label: 'Enviar a Agentes', action: 'BROADCAST_AGENTS', requiredRole: ['gerente'] },
                     { id: '0', label: 'Volver al Menú Principal', next: 'MAIN' }
                 ]
@@ -344,6 +344,25 @@ class MenuManager {
                     waitingFor: 'broadcast_message'
                 };
 
+            case 'BROADCAST_FILTERED':
+                session.actionStep = 1; // Paso 1: Mostrar lista de clientes
+                // Ejecutar inmediatamente la carga de clientes
+                return await this.processBroadcastFiltered(session, '', userData);
+
+            case 'BROADCAST_AGENTS':
+                if (userRole.toLowerCase() !== 'gerente') {
+                    session.currentAction = null;
+                    return {
+                        success: false,
+                        message: '🚫 Solo los gerentes pueden enviar mensajes a agentes.'
+                    };
+                }
+                return {
+                    success: true,
+                    message: '📢 *ENVÍO MASIVO A AGENTES*\n\nEscribe el mensaje que deseas enviar a todos los agentes:',
+                    waitingFor: 'broadcast_agents_message'
+                };
+
             case 'ADD_AGENT':
                 if (userRole.toLowerCase() !== 'gerente') {
                     session.currentAction = null;
@@ -469,6 +488,12 @@ class MenuManager {
             
             case 'BROADCAST_CLIENTS':
                 return this.processBroadcastClients(session, input);
+            
+            case 'BROADCAST_FILTERED':
+                return await this.processBroadcastFiltered(session, input, userData);
+            
+            case 'BROADCAST_AGENTS':
+                return this.processBroadcastAgents(session, input);
             
             case 'ADD_AGENT':
                 return this.processAddAgent(session, input);
@@ -1566,6 +1591,182 @@ class MenuManager {
                 parameters: {
                     message: session.actionData.message,
                     filters: {}
+                }
+            }
+        };
+    }
+
+    // Procesar envío masivo filtrado (selección manual de clientes)
+    async processBroadcastFiltered(session, input, userData) {
+        switch (session.actionStep) {
+            case 1: // Mostrar lista de clientes para selección
+                try {
+                    console.log('📋 Obteniendo clientes para selección manual...');
+                    console.log(`🔍 DEBUG - userData:`, userData);
+                    console.log(`🔍 DEBUG - userData.id:`, userData.id);
+                    
+                    // Obtener clientes del agente usando el servicio
+                    const axios = require('axios');
+                    const databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
+                    
+                    console.log(`🔍 DEBUG - URL: ${databaseUrl}/api/clients?agente_id=${userData.id}&estado=1`);
+                    
+                    const clientsResponse = await axios.get(`${databaseUrl}/api/clients`, { 
+                        params: { agente_id: userData.id, estado: 1 },
+                        timeout: 10000 
+                    });
+                    
+                    console.log(`🔍 DEBUG - clientsResponse.status:`, clientsResponse.status);
+                    console.log(`🔍 DEBUG - clientsResponse.data:`, clientsResponse.data);
+
+                    if (!clientsResponse.data.success || !clientsResponse.data.data || clientsResponse.data.data.length === 0) {
+                        session.currentAction = null;
+                        return {
+                            success: true,
+                            message: '📋 No tienes clientes asignados para envío masivo personalizado.'
+                        };
+                    }
+
+                    const clients = clientsResponse.data.data;
+                    session.actionData.allClients = clients; // Guardar lista completa
+                    
+                    // Construir lista numerada de clientes
+                    let clientList = '📋 *ELIGE QUÉ CLIENTES RECIBIRÁN EL MENSAJE*\n\n';
+                    clientList += '👇 Esta es tu lista de clientes asignados:\n\n';
+                    
+                    clients.forEach((client, index) => {
+                        const nombre = client.nombre || 'Sin nombre';
+                        const apellido = client.apellido || '';
+                        const telefono = client.telefono || '';
+                        
+                        clientList += `${index + 1}. ${nombre} ${apellido} (${telefono})\n`;
+                    });
+                    
+                    clientList += '\n💡 *INSTRUCCIONES:*\n';
+                    clientList += '• Escribe los NÚMEROS de los clientes que quieres incluir\n';
+                    clientList += '• Separa los números con comas\n';
+                    clientList += '• Ejemplo: Si quieres enviar a Juan, Carlos y Ana, escribe: *1,3,5*\n\n';
+                    clientList += '📝 *Escribe tu selección ahora:*';
+                    
+                    session.actionStep = 2; // Siguiente paso: recibir selección
+                    
+                    return {
+                        success: true,
+                        message: clientList,
+                        waitingFor: 'client_selection'
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ Error obteniendo clientes:', error.message);
+                    console.error('❌ Error completo:', error);
+                    session.currentAction = null;
+                    return {
+                        success: false,
+                        message: `❌ Error cargando tus clientes: ${error.message}\n\n🔧 Verifica que:\n• Tu módulo base-datos esté ejecutándose\n• Tengas clientes asignados\n• Tu sesión esté activa\n\n🔄 Intenta nuevamente en unos momentos.`
+                    };
+                }
+
+            case 2: // Procesar selección de clientes
+                try {
+                    // Parsear la selección (ej: "1,3,5,7")
+                    const selections = input.split(',').map(num => parseInt(num.trim())).filter(num => !isNaN(num));
+                    
+                    if (selections.length === 0) {
+                        return {
+                            success: false,
+                            message: '❌ *NO ENTENDÍ TU SELECCIÓN*\n\n💡 Debes escribir los NÚMEROS de la lista, separados por comas.\n\n✅ *Ejemplos correctos:*\n• Para el cliente 1: escribe *1*\n• Para clientes 1 y 3: escribe *1,3*\n• Para clientes 2, 4 y 5: escribe *2,4,5*\n\n🔄 Intenta nuevamente:'
+                        };
+                    }
+                    
+                    // Validar que todos los números estén en rango
+                    const allClients = session.actionData.allClients;
+                    const invalidSelections = selections.filter(num => num < 1 || num > allClients.length);
+                    
+                    if (invalidSelections.length > 0) {
+                        return {
+                            success: false,
+                            message: `❌ *NÚMEROS FUERA DE RANGO*\n\nLos números ${invalidSelections.join(', ')} no existen en tu lista.\n\n✅ Usa números del *1* al *${allClients.length}* solamente.\n\n🔄 Escribe tu selección nuevamente:`
+                        };
+                    }
+                    
+                    // Obtener clientes seleccionados
+                    const selectedClients = selections.map(num => allClients[num - 1]);
+                    session.actionData.selectedClients = selectedClients;
+                    
+                    // Mostrar resumen de selección
+                    let summary = `✅ *PERFECTO! HAS SELECCIONADO ${selectedClients.length} CLIENTE${selectedClients.length > 1 ? 'S' : ''}:*\n\n`;
+                    selectedClients.forEach((client, index) => {
+                        const nombre = client.nombre || 'Sin nombre';
+                        const apellido = client.apellido || '';
+                        summary += `✓ ${nombre} ${apellido}\n`;
+                    });
+                    
+                    summary += '\n📝 *PASO FINAL:*\n';
+                    summary += '💬 Ahora escribe el mensaje que quieres enviar a estos clientes:\n';
+                    summary += '(Ejemplo: "Nueva casa disponible en zona norte, precio especial")';
+                    
+                    session.actionStep = 3; // Siguiente paso: recibir mensaje
+                    
+                    return {
+                        success: true,
+                        message: summary,
+                        waitingFor: 'broadcast_message'
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ Error procesando selección:', error.message);
+                    return {
+                        success: false,
+                        message: '❌ Error procesando tu selección. Intenta nuevamente con formato: 1,3,5'
+                    };
+                }
+
+            case 3: // Procesar mensaje y ejecutar envío
+                const mensaje = input.trim();
+                
+                if (!mensaje) {
+                    return {
+                        success: false,
+                        message: '❌ *FALTA EL MENSAJE*\n\n📝 Debes escribir el mensaje que quieres enviar a tus clientes seleccionados.\n\n💡 Ejemplo: "Tengo una nueva propiedad que te puede interesar"\n\n🔄 Escribe tu mensaje:'
+                    };
+                }
+                
+                session.actionData.message = mensaje;
+                session.currentAction = null;
+                
+                return {
+                    success: true,
+                    message: `🚀 *ENVIANDO MENSAJE...*\n\n📤 Enviando tu mensaje a ${session.actionData.selectedClients.length} cliente${session.actionData.selectedClients.length > 1 ? 's' : ''} seleccionado${session.actionData.selectedClients.length > 1 ? 's' : ''}...\n\n⏳ Por favor espera, esto puede tomar unos momentos...`,
+                    executeCommand: {
+                        type: 'broadcast_clients_custom',
+                        parameters: {
+                            message: mensaje,
+                            selectedClients: session.actionData.selectedClients
+                        }
+                    }
+                };
+
+            default:
+                session.currentAction = null;
+                return {
+                    success: false,
+                    message: '❌ Error en el proceso. Intenta nuevamente.'
+                };
+        }
+    }
+
+    // Procesar envío masivo a agentes  
+    processBroadcastAgents(session, input) {
+        session.actionData.message = input;
+        session.currentAction = null;
+        
+        return {
+            success: true,
+            message: '📤 Preparando envío masivo a agentes...',
+            executeCommand: {
+                type: 'broadcast_agents',
+                parameters: {
+                    message: session.actionData.message
                 }
             }
         };

@@ -478,6 +478,142 @@ app.post('/api/sessions/restart-all', async (req, res) => {
 
 // ==================== RUTAS DE MENSAJERÍA ====================
 
+// Envío masivo a clientes del agente
+app.post('/api/agent/send-bulk', async (req, res) => {
+    try {
+        const { agentPhone, message, mediaUrl, mediaType, delayBetweenMessages } = req.body;
+
+        console.log('📤 ENVÍO MASIVO - Datos recibidos:');
+        console.log(`   👤 agentPhone: ${agentPhone || 'UNDEFINED'}`);
+        console.log(`   📝 message: '${message ? message.substring(0, 100) + '...' : 'UNDEFINED'}' (len: ${message?.length || 0})`);
+        console.log(`   ⏱️ delayBetweenMessages: ${delayBetweenMessages || 'default 2000ms'}`);
+
+        if (!agentPhone || !message) {
+            return res.status(400).json({
+                success: false,
+                error: 'agentPhone y message son requeridos para envío masivo'
+            });
+        }
+
+        // Obtener agente por teléfono desde la base de datos
+        const axios = require('axios');
+        const databaseUrl = app.locals.databaseUrl;
+        
+        console.log('🔍 Buscando agente en base de datos...');
+        const agentResponse = await axios.get(`${databaseUrl}/api/users/by-phone/${agentPhone}`, { 
+            timeout: 10000 
+        });
+
+        if (!agentResponse.data.success || !agentResponse.data.data) {
+            return res.status(404).json({
+                success: false,
+                error: `Agente con teléfono ${agentPhone} no encontrado en el sistema`
+            });
+        }
+
+        const agent = agentResponse.data.data;
+        console.log(`✅ Agente encontrado: ${agent.nombre} ${agent.apellido} (ID: ${agent.id})`);
+
+        // Obtener clientes asignados a este agente
+        console.log('📋 Obteniendo clientes asignados al agente...');
+        const clientsResponse = await axios.get(`${databaseUrl}/api/clients/by-agent/${agent.id}`, { 
+            timeout: 10000 
+        });
+
+        if (!clientsResponse.data.success || !clientsResponse.data.data || clientsResponse.data.data.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: `El agente ${agent.nombre} no tiene clientes asignados`,
+                data: {
+                    agent: `${agent.nombre} ${agent.apellido}`,
+                    clientsFound: 0,
+                    messagesSent: 0,
+                    errors: []
+                }
+            });
+        }
+
+        const clients = clientsResponse.data.data;
+        console.log(`📱 ${clients.length} clientes encontrados para el agente ${agent.nombre}`);
+
+        // Configurar control de velocidad (rate limiting)
+        const delay = parseInt(delayBetweenMessages) || 2000; // 2 segundos por defecto
+        const maxClientsPerBatch = 50; // Límite de clientes por envío masivo
+        
+        if (clients.length > maxClientsPerBatch) {
+            return res.status(400).json({
+                success: false,
+                error: `Demasiados clientes (${clients.length}). Máximo permitido: ${maxClientsPerBatch}`
+            });
+        }
+
+        // Iniciar envío masivo
+        console.log(`🚀 Iniciando envío masivo a ${clients.length} clientes con delay de ${delay}ms`);
+        
+        let messagesSent = 0;
+        let errors = [];
+        const startTime = Date.now();
+
+        for (let i = 0; i < clients.length; i++) {
+            const client = clients[i];
+            
+            try {
+                console.log(`📤 [${i + 1}/${clients.length}] Enviando a: ${client.nombre || 'Sin nombre'} (${client.telefono})`);
+                
+                // Usar la sesión del agente específico
+                const sessionToUse = agentPhone;
+                const result = await sessionManager.sendMessage(sessionToUse, {
+                    to: client.telefono,
+                    message,
+                    mediaUrl,
+                    mediaType
+                });
+
+                messagesSent++;
+                console.log(`   ✅ Mensaje enviado exitosamente a ${client.nombre || client.telefono}`);
+                
+                // Delay entre mensajes (excepto en el último)
+                if (i < clients.length - 1) {
+                    console.log(`   ⏳ Esperando ${delay}ms antes del siguiente envío...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+
+            } catch (error) {
+                console.error(`   ❌ Error enviando a ${client.nombre || client.telefono}: ${error.message}`);
+                errors.push({
+                    client: `${client.nombre || 'Sin nombre'} (${client.telefono})`,
+                    error: error.message
+                });
+            }
+        }
+
+        const totalTime = Date.now() - startTime;
+        console.log(`✅ Envío masivo completado en ${Math.round(totalTime / 1000)}s`);
+        console.log(`   📊 Enviados: ${messagesSent}/${clients.length}`);
+        console.log(`   ❌ Errores: ${errors.length}`);
+
+        res.json({
+            success: true,
+            message: `Envío masivo completado para ${agent.nombre} ${agent.apellido}`,
+            data: {
+                agent: `${agent.nombre} ${agent.apellido}`,
+                clientsFound: clients.length,
+                messagesSent,
+                errors: errors.length > 0 ? errors : null,
+                totalTimeSeconds: Math.round(totalTime / 1000),
+                averageDelayMs: delay
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error en envío masivo:', error.message);
+        res.status(500).json({
+            success: false,
+            error: `Error en envío masivo: ${error.message}`
+        });
+    }
+});
+
 // Enviar mensaje desde el agente (al cliente)
 app.post('/api/agent/send', async (req, res) => {
     try {
@@ -676,6 +812,7 @@ async function startMultiSessionWhatsApp() {
             console.log('   POST /api/sessions/clear-auth - Limpiar archivos auth');
             console.log('   POST /api/sessions/:type/restart - Reiniciar sesión');
             console.log('   POST /api/agent/send - Enviar desde agente');
+            console.log('   POST /api/agent/send-bulk - Envío masivo a clientes');
             console.log('   POST /api/system/send - Enviar desde sistema');
             console.log('   GET  /api/health - Estado del módulo');
             console.log('\n💡 Para iniciar: POST /api/initialize con agentPhone, agentName, systemPhone');
