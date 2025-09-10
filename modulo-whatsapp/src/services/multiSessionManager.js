@@ -593,7 +593,7 @@ class MultiSessionManager {
         this.cacheMessage(messageKey);
         console.log(`✅ Mensaje marcado como procesado: ${messageKey}`);
         
-        // Preparar datos del mensaje
+        // Preparar datos del mensaje básicos
         const messageData = {
             id: message.id._serialized,
             from: message.from,
@@ -604,6 +604,41 @@ class MultiSessionManager {
             sessionType: sessionType,
             sessionName: sessionData.name
         };
+
+        // ✅ NUEVO: Procesar archivos multimedia si están presentes
+        if (message.hasMedia) {
+            console.log('📎 Mensaje contiene media, descargando...');
+            try {
+                const media = await message.downloadMedia();
+                
+                if (media) {
+                    console.log(`📥 Media descargada exitosamente:`);
+                    console.log(`   📄 Nombre: ${media.filename || 'archivo_sin_nombre'}`);
+                    console.log(`   📋 MIME: ${media.mimetype}`);
+                    console.log(`   📏 Tamaño: ${media.data ? Buffer.from(media.data, 'base64').length : 0} bytes`);
+                    
+                    // Crear estructura de archivo completa
+                    messageData.fileData = {
+                        fileName: media.filename || `archivo_${Date.now()}`,
+                        buffer: Buffer.from(media.data, 'base64'),
+                        mimeType: media.mimetype,
+                        size: media.data ? Buffer.from(media.data, 'base64').length : 0,
+                        isSimulated: false
+                    };
+                    
+                    // Actualizar el body del mensaje para incluir el nombre del archivo
+                    if (messageData.type === 'document') {
+                        messageData.body = media.filename || messageData.body;
+                    }
+                } else {
+                    console.log('⚠️ Media descargada es null o vacía');
+                }
+                
+            } catch (mediaError) {
+                console.error('❌ Error descargando media:', mediaError.message);
+                // En caso de error, mantener el comportamiento actual (sin archivo)
+            }
+        }
 
         console.log(`📦 Datos del mensaje preparados:`, {
             id: messageData.id,

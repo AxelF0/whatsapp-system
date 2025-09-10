@@ -4,12 +4,14 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs').promises;
 const PropertyModel = require('../../../modulo-base-datos/src/models/postgresql/propertyModel');
+const FileService = require('./fileService');
 
 class CommandProcessor {
     constructor(propertyService, clientService, userService) {
         this.propertyService = propertyService;
         this.clientService = clientService;
         this.userService = userService;
+        this.fileService = new FileService();
 
         this.databaseUrl = process.env.DATABASE_URL || 'http://localhost:3006';
         this.responsesUrl = process.env.RESPONSES_URL || 'http://localhost:3005';
@@ -645,29 +647,41 @@ class CommandProcessor {
         if (fileData.multipleFiles && fileData.filesList) {
             console.log(`📁 Procesando ${fileData.totalFiles} archivos para propiedad ${propertyId}`);
 
-            // Organizar archivos por tipo
-            const organizedFiles = this.organizeFilesByType(fileData.filesList);
-            
-            // Procesar archivos según su tipo
-            const processedFiles = await this.processFilesByType(organizedFiles, propertyId);
+            try {
+                // Procesar archivos usando el FileService
+                const results = await this.fileService.processMultipleFiles(fileData.filesList, propertyId);
+                
+                // Generar resumen de procesamiento
+                const summary = this.generateProcessingSummary(results);
+                const locationsSummary = this.generateLocationsSummary(results);
 
-            // Generar resumen de procesamiento
-            const summary = this.generateFileProcessingSummary(processedFiles);
-
-            return {
-                success: true,
-                action: 'multiple_files_added',
-                message: `✅ **Archivos procesados exitosamente**\n\n🏠 **${property.nombre_propiedad}**\n📍 ${property.ubicacion}\n\n📊 **Resumen de procesamiento:**\n${summary}\n\n💾 **Ubicaciones:**\n${this.generateFileLocationsSummary(processedFiles)}`,
-                data: {
-                    propertyId: propertyId,
-                    property: property,
-                    processedFiles: processedFiles,
-                    totalFiles: fileData.totalFiles
-                }
-            };
+                return {
+                    success: true,
+                    action: 'multiple_files_added',
+                    message: `✅ **Archivos procesados exitosamente**\n\n🏠 **${property.nombre_propiedad}**\n📍 ${property.ubicacion}\n\n📊 **Resumen de procesamiento:**\n${summary}\n\n💾 **Ubicaciones:**\n${locationsSummary}\n\n📋 **Detalles:**\n• ${results.summary.success} archivos guardados exitosamente\n• ${results.summary.errors} archivos con errores\n• Total procesados: ${results.summary.total}`,
+                    data: {
+                        propertyId: propertyId,
+                        property: property,
+                        results: results,
+                        totalFiles: fileData.totalFiles
+                    }
+                };
+                
+            } catch (error) {
+                return {
+                    success: false,
+                    action: 'files_error',
+                    message: `❌ **Error procesando archivos**\n\n🏠 **${property.nombre_propiedad}**\n\n💥 **Error:** ${error.message}\n\n🔄 Intenta nuevamente o contacta al administrador.`,
+                    data: {
+                        propertyId: propertyId,
+                        property: property,
+                        error: error.message
+                    }
+                };
+            }
         }
 
-        // Archivo único
+        // Archivo único - TODO: Implementar para archivos únicos
         return {
             success: true,
             action: 'file_added',
@@ -802,6 +816,81 @@ class CommandProcessor {
         }
 
         return processed;
+    }
+
+    // Generar resumen de procesamiento para el FileService
+    generateProcessingSummary(results) {
+        const summary = [];
+        const categories = results.summary.categories || {};
+        
+        for (const [category, count] of Object.entries(categories)) {
+            let emoji = '📁';
+            let destination = '';
+            
+            switch (category) {
+                case 'image':
+                    emoji = '📷';
+                    destination = 'Backend/files/images/';
+                    break;
+                case 'pdf':
+                    emoji = '📑';
+                    destination = 'Módulo IA/data/pdfs/';
+                    break;
+                case 'word':
+                    emoji = '📄';
+                    destination = 'Módulo IA/data/docs/';
+                    break;
+                case 'video':
+                    emoji = '🎥';
+                    destination = 'Backend/files/videos/';
+                    break;
+                case 'document':
+                    emoji = '📋';
+                    destination = 'Backend/files/others/';
+                    break;
+                case 'audio':
+                    emoji = '🔊';
+                    destination = 'Backend/files/others/';
+                    break;
+                default:
+                    emoji = '📁';
+                    destination = 'Backend/files/others/';
+            }
+            
+            summary.push(`${emoji} ${count} ${category}(s) → ${destination}`);
+        }
+
+        return summary.join('\n') || '• Sin archivos procesados';
+    }
+
+    // Generar resumen de ubicaciones para el FileService
+    generateLocationsSummary(results) {
+        const locations = new Set();
+        
+        // Agregar ubicaciones de archivos exitosos
+        for (const file of results.successful) {
+            switch (file.category) {
+                case 'pdf':
+                    locations.add('📑 PDFs → modulo-ia/data/pdfs/');
+                    break;
+                case 'word':
+                    locations.add('📄 Word Docs → modulo-ia/data/docs/');
+                    break;
+                case 'image':
+                    locations.add('📷 Imágenes → modulo-backend/files/images/');
+                    break;
+                case 'video':
+                    locations.add('🎥 Videos → modulo-backend/files/videos/');
+                    break;
+                case 'audio':
+                case 'document':
+                case 'other':
+                default:
+                    locations.add('📁 Otros → modulo-backend/files/others/');
+            }
+        }
+
+        return Array.from(locations).join('\n') || '• Sin ubicaciones';
     }
 
     // Asegurar que todas las carpetas de destino existan

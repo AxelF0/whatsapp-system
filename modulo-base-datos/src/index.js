@@ -9,12 +9,13 @@ const pgClient = require('./connections/pgConnection');
 const  UserModel = require('./models/postgresql/userModel');
 const ClientModel = require('./models/postgresql/clientModel');
 const PropertyModel = require('./models/postgresql/propertyModel');
-
+const PropertyFileModel = require('./models/postgresql/propertyFileModel');
 
 // Servicios
 const UserService = require('./services/userService');
 const ClientService = require('./services/clientService');
 const PropertyService = require('./services/propertyService');
+const PropertyFileService = require('./services/propertyFileService');
 
 const app = express();
 const PORT = process.env.DATABASE_PORT || 3006;
@@ -28,17 +29,20 @@ app.use(express.urlencoded({ extended: true }));
 const userModel = new UserModel(pgClient);
 const clientModel = new ClientModel(pgClient);
 const propertyModel = new PropertyModel(pgClient);
+const propertyFileModel = new PropertyFileModel(pgClient);
 
 // Inicializar servicios
 const userService = new UserService(userModel);
 const clientService = new ClientService(clientModel);
 const propertyService = new PropertyService(propertyModel);
+const propertyFileService = new PropertyFileService(propertyFileModel);
 
 // Hacer servicios disponibles para otros módulos
 app.locals.services = {
     userService,
     clientService,
-    propertyService
+    propertyService,
+    propertyFileService
 };
 
 // Rutas para Usuarios
@@ -421,6 +425,85 @@ app.get('/api/health', async (req, res) => {
             status: 'unhealthy',
             error: error.message
         });
+    }
+});
+
+// ==================== RUTAS PARA ARCHIVOS DE PROPIEDADES ====================
+
+// Crear archivo de propiedad
+app.post('/api/property-files', async (req, res) => {
+    try {
+        const fileData = req.body;
+        const newFile = await propertyFileService.createPropertyFile(fileData);
+        res.status(201).json({ success: true, data: newFile });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obtener archivos por ID de propiedad
+app.get('/api/property-files/property/:propertyId', async (req, res) => {
+    try {
+        const { propertyId } = req.params;
+        const files = await propertyFileService.getFilesByPropertyId(parseInt(propertyId));
+        res.json({ success: true, data: files });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obtener archivo por ID
+app.get('/api/property-files/:fileId', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        const file = await propertyFileService.getFileById(parseInt(fileId));
+        res.json({ success: true, data: file });
+    } catch (error) {
+        res.status(404).json({ success: false, error: error.message });
+    }
+});
+
+// Actualizar archivo
+app.put('/api/property-files/:fileId', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        const updateData = req.body;
+        const updatedFile = await propertyFileService.updateFile(parseInt(fileId), updateData);
+        res.json({ success: true, data: updatedFile });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Eliminar archivo
+app.delete('/api/property-files/:fileId', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        const deletedFile = await propertyFileService.deleteFile(parseInt(fileId));
+        res.json({ success: true, data: deletedFile });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obtener estadísticas de archivos por propiedad
+app.get('/api/property-files/property/:propertyId/stats', async (req, res) => {
+    try {
+        const { propertyId } = req.params;
+        const stats = await propertyFileService.getFileStatsByProperty(parseInt(propertyId));
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obtener tipos de archivo disponibles
+app.get('/api/file-types', async (req, res) => {
+    try {
+        const fileTypes = await propertyFileService.getFileTypes();
+        res.json({ success: true, data: fileTypes });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 

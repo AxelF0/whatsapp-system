@@ -13,8 +13,8 @@ const PORT = process.env.PROCESSING_PORT || 3002;
 
 // Middlewares
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' })); // ✅ Aumentar límite para archivos
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Log de requests
 app.use((req, res, next) => {

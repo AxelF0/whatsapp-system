@@ -118,6 +118,17 @@ class MessageProcessor {
                 response_sent: false
             };
 
+            // ✅ NUEVO: Incluir datos de archivo si están presentes
+            if (messageData.fileData) {
+                console.log('📎 Incluyendo datos de archivo en procesamiento:', {
+                    fileName: messageData.fileData.fileName,
+                    mimeType: messageData.fileData.mimeType,
+                    size: messageData.fileData.size,
+                    isSimulated: messageData.fileData.isSimulated
+                });
+                processingData.fileData = messageData.fileData;
+            }
+
             console.log('📤 Enviando al módulo de procesamiento...');
 
             // 3. Enviar al módulo de procesamiento

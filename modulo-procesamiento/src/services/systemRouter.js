@@ -92,6 +92,17 @@ class SystemRouter {
                 source: 'processing-module'
             };
 
+            // ✅ NUEVO: Incluir datos de archivo si están presentes
+            if (messageData.fileData) {
+                console.log('📎 Incluyendo fileData en request al Backend:', {
+                    fileName: messageData.fileData.fileName,
+                    mimeType: messageData.fileData.mimeType,
+                    size: messageData.fileData.size,
+                    isSimulated: messageData.fileData.isSimulated
+                });
+                backendRequest.messageData.fileData = messageData.fileData;
+            }
+
             // Enviar al backend para procesamiento completo
             console.log(`📡 Enviando al Backend: ${this.backendUrl}/api/system/process`);
             const backendResponse = await axios.post(

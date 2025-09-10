@@ -136,13 +136,19 @@ class MenuManager {
             user.phone, 
             user.role, 
             messageData.body, 
-            user.userData
+            user.userData,
+            messageData // ✅ NUEVO: Pasar messageData completo para acceder a fileData
         );
     }
 
     // Procesar entrada del usuario
-    async processInput(userId, userRole, input, userData) {
+    async processInput(userId, userRole, input, userData, messageData = null) {
         const session = this.getSession(userId);
+        
+        // ✅ NUEVO: Guardar messageData en la sesión para acceso a fileData
+        if (messageData) {
+            session.messageData = messageData;
+        }
         
         console.log(`📱 Procesando entrada para ${userId}: "${input}"`);
         console.log(`   Estado actual: Menu=${session.currentMenu}, Action=${session.currentAction}`);
@@ -1858,7 +1864,33 @@ class MenuManager {
                 if (!session.actionData.uploadedFiles) {
                     session.actionData.uploadedFiles = [];
                 }
-                session.actionData.uploadedFiles.push(input);
+                
+                // ✅ ACTUALIZADO: Manejar archivos reales de WhatsApp y fallback a simulación
+                let fileInfo;
+                if (session.messageData && session.messageData.fileData) {
+                    // ✅ NUEVO: Usar datos reales del archivo descargado desde WhatsApp
+                    fileInfo = session.messageData.fileData;
+                    console.log(`📁 REAL: Procesando archivo real desde WhatsApp: ${fileInfo.fileName}`);
+                    console.log(`   📏 Tamaño real: ${fileInfo.size} bytes`);
+                    console.log(`   📋 MIME real: ${fileInfo.mimeType}`);
+                    console.log(`   🔧 Simulado: ${fileInfo.isSimulated}`);
+                } else if (typeof input === 'string') {
+                    // FALLBACK: El input es solo el nombre del archivo, crear estructura simulada
+                    // (Solo se usa cuando WhatsApp no pudo descargar el archivo)
+                    console.log(`📁 FALLBACK: Simulando archivo para: ${input}`);
+                    fileInfo = {
+                        fileName: input,
+                        buffer: Buffer.from(`Contenido simulado del archivo: ${input}`),
+                        mimeType: this.guessMimeType(input),
+                        size: 1024, // Tamaño simulado
+                        isSimulated: true
+                    };
+                } else {
+                    // El input ya tiene la estructura correcta
+                    fileInfo = input;
+                }
+                
+                session.actionData.uploadedFiles.push(fileInfo);
                 
                 return {
                     success: true,
@@ -1878,6 +1910,53 @@ class MenuManager {
                     expectsMedia: true
                 };
         }
+    }
+
+    // FALLBACK: Función para adivinar tipo MIME basado en extensión
+    // (Solo se usa cuando WhatsApp no proporciona el MIME type)
+    guessMimeType(fileName) {
+        if (!fileName) return 'application/octet-stream';
+        
+        const ext = fileName.toLowerCase().split('.').pop();
+        
+        const mimeTypes = {
+            // Imágenes
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp',
+            'webp': 'image/webp',
+            
+            // Documentos
+            'pdf': 'application/pdf',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt': 'text/plain',
+            'rtf': 'application/rtf',
+            
+            // Videos
+            'mp4': 'video/mp4',
+            'avi': 'video/x-msvideo',
+            'mov': 'video/quicktime',
+            'wmv': 'video/x-ms-wmv',
+            'flv': 'video/x-flv',
+            'webm': 'video/webm',
+            
+            // Audio
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'ogg': 'audio/ogg',
+            'm4a': 'audio/mp4',
+            
+            // Otros
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xls': 'application/vnd.ms-excel',
+            'ppt': 'application/vnd.ms-powerpoint',
+            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        };
+        
+        return mimeTypes[ext] || 'application/octet-stream';
     }
 
     // Procesar eliminar cliente
