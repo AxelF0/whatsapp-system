@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 # Crear app FastAPI
 app = FastAPI(
-    title="REMAXI - Módulo IA",
-    description="Servicio RAG unificado para consultas inmobiliarias",
+    title="Remaxi - Remax Express IA",
+    description="Asistente inmobiliario inteligente para consultas de venta y alquiler",
     version="1.0.0"
 )
 
@@ -81,7 +81,9 @@ class HealthResponse(BaseModel):
 async def root():
     """Endpoint raíz"""
     return {
-        "service": "REMAXI - Módulo IA",
+        "service": "Remaxi - Remax Express IA",
+        "bot_name": "Remaxi",
+        "company": "Remax Express",
         "status": "online",
         "version": "1.0.0",
         "endpoints": {
@@ -240,30 +242,49 @@ def _classify_query(question: str) -> str:
 
 def _analyze_client_interest(question: str, answer: str) -> tuple[bool, Optional[List[str]]]:
     """
-    Analizar si el cliente muestra interés y requiere atención del agente
+    Analizar si el cliente muestra interés alto y requiere coordinación de cita
     """
     question_lower = question.lower()
     answer_lower = answer.lower()
     
-    # Frases que indican alto interés
+    # Frases de ALTO interés que requieren acción inmediata
     high_interest_phrases = [
-        'mas informacion', 'más información', 'mas detalles', 'más detalles',
-        'quiero ver', 'me interesa', 'agendar', 'cita', 'visita',
-        'cuando puedo', 'disponible para', 'contactar', 'telefono',
-        'coordinar cita', 'más info', 'caracteristicas', 'precio exacto'
+        'precio', 'precios', 'costo', 'valor', 'cuanto cuesta', 'cuánto cuesta',
+        'mas informacion', 'más información', 'mas detalles', 'más detalles', 
+        'caracteristicas', 'características', 'ubicacion', 'ubicación',
+        'quiero ver', 'me interesa', 'me gusta', 'visitar', 'ver la propiedad',
+        'agendar', 'cita', 'visita', 'cuando puedo', 'disponible',
+        'contactar', 'telefono', 'teléfono', 'llamar', 'whatsapp',
+        'comprar', 'alquilar', 'rentar', 'vender'
     ]
     
-    # Detectar interés en la pregunta
+    # Frases que indican intención de agendar cita
+    appointment_phrases = [
+        'agendar', 'cita', 'visita', 'ver la propiedad', 'coordinar',
+        'cuando puedo', 'disponible para', 'visitar', 'conocer'
+    ]
+    
+    # Detectar interés alto en la pregunta
     interest_detected = any(phrase in question_lower for phrase in high_interest_phrases)
     
-    # Si hay interés, sugerir acciones
+    # Detectar si quiere agendar cita específicamente
+    wants_appointment = any(phrase in question_lower for phrase in appointment_phrases)
+    
+    # Si detecta frase de cita en la respuesta de la IA
+    appointment_in_answer = "COORDINAR_CITA_INMOBILIARIA" in answer
+    
     suggested_actions = None
-    if interest_detected:
+    if interest_detected or wants_appointment:
         suggested_actions = [
-            "Ofrecer agendar cita de visita",
-            "Proporcionar información de contacto del agente",
-            "Enviar detalles adicionales de la propiedad"
+            "Cliente muestra interés alto - contactar prioritariamente",
+            "Ofrecer información detallada de propiedades",
+            "Agendar cita de visita personalizada",
+            "Proporcionar catálogo de propiedades similares"
         ]
+        
+        # Si hay frase clave de cita, marcarlo para seguimiento especial
+        if appointment_in_answer or wants_appointment:
+            suggested_actions.append("COORDINAR_CITA_INMOBILIARIA")
     
     return interest_detected, suggested_actions
 
@@ -273,12 +294,14 @@ if __name__ == "__main__":
     port = int(os.getenv("IA_PORT", 3007))
     host = os.getenv("IA_HOST", "127.0.0.1")
     
-    print("🚀 INICIANDO REMAXI - MÓDULO IA (FastAPI)")
+    print("🚀 INICIANDO REMAXI - REMAX EXPRESS IA")
     print("=" * 50)
+    print(f"Bot: Remaxi 🤖")
+    print(f"Empresa: Remax Express 🏢")
     print(f"Puerto: {port}")
     print(f"Host: {host}")
     print("Endpoints disponibles:")
-    print("  • POST /api/query - Procesar consultas")
+    print("  • POST /api/query - Procesar consultas inmobiliarias")
     print("  • GET /api/health - Estado del servicio") 
     print("  • GET /api/status - Estado RAG detallado")
     print("  • GET /docs - Documentación API")

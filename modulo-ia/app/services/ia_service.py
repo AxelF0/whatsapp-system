@@ -38,27 +38,8 @@ REQUEST_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT_SEC", "10"))  # Phi es más ráp
 TOP_K = int(os.getenv("TOP_K", "4"))
 MIN_SIM_THRESHOLD = float(os.getenv("MIN_SIM_THRESHOLD", "0.32"))
 
-# --- System instruction to enforce RAG discipline --------------------
-SYSTEM_INSTRUCTION = """
-Eres un asistente inmobiliario de REMAXI. Responde SOLO basándote en la información disponible.
-
-REGLAS ESTRICTAS:
-1. NUNCA inventes propiedades, precios o ubicaciones
-2. Si NO tienes información específica de propiedades, responde: "No tengo información específica sobre propiedades en esa zona. Te conectaré con un agente especializado que puede ayudarte mejor."
-3. SOLO menciona propiedades que aparezcan en el contexto proporcionado
-4. Si el contexto está vacío, NO inventes información
-
-CUANDO SÍ TIENES INFORMACIÓN:
-- Menciona propiedades específicas con precios reales
-- Incluye ubicación exacta y características
-- Proporciona datos del agente responsable
-
-CUANDO NO TIENES INFORMACIÓN:
-- Admite que no tienes datos específicos
-- Ofrece conectar con un agente
-
-Mantén un tono amigable pero NUNCA inventes información.
-""".strip()
+# --- Instrucciones cortas para el modelo ---
+SYSTEM_INSTRUCTION = """Eres Remaxi, asistente inmobiliario de Remax Express. Responde con información específica de propiedades usando datos del contexto. Si no tienes información suficiente, pide más detalles sobre zona, tipo de propiedad y si es para compra/alquiler."""
 
 # --- Singleton pattern para cache del modelo -----------------
 _MODEL_CACHE: Optional[SentenceTransformer] = None
@@ -150,14 +131,14 @@ def get_index_overview(max_topics: int = 8) -> Dict:
 
 def build_guidance_reply(user_query: str, max_examples: int = 6) -> str:
     """
-    Build a friendly guidance message suggesting real topics found in the PDFs.
+    Build a friendly guidance message with emojis suggesting real topics found in the PDFs.
     """
     ov = get_index_overview(max_examples)
     if ov["total_chunks"] == 0:
         return (
-            "¡Hola! Soy el asistente de Remaxi, inmobiliaria de venta y alquiler de propiedades.\n"
-            "Aún no tengo documentos cargados sobre propiedades disponibles.\n"
-            "Carga documentos y pregúntame sobre propiedades en venta o alquiler, precios y ubicaciones."
+            "¡Hola! Soy Remaxi de Remax Express, especializado en venta y alquiler de propiedades.\n"
+            "Aún no tengo información cargada sobre propiedades disponibles.\n"
+            "¿Podrías contarme qué tipo de propiedad buscas y en qué zona?"
         )
 
     bullets = []
@@ -165,16 +146,17 @@ def build_guidance_reply(user_query: str, max_examples: int = 6) -> str:
         pdf = t.get("pdf", "documento.pdf")
         title = (t.get("title") or "").strip()
         if title:
-            bullets.append(f"• {title} — ({pdf})")
+            bullets.append(f"• {title}")
 
-    examples = "\n".join(bullets) if bullets else "• Consulta por secciones y conceptos clave presentes en tus PDFs."
+    examples = "\n".join(bullets) if bullets else "• Propiedades disponibles en nuestro catálogo"
 
     return (
-        "No encontré información suficiente sobre esa consulta de propiedades.\n\n"
-        "Para obtener mejores resultados, pregunta sobre propiedades en venta o alquiler presentes en los documentos. "
-        "Por ejemplo:\n"
+        "Para ayudarte mejor con esa consulta, aquí tienes algunas opciones disponibles:\n\n"
         f"{examples}\n\n"
-        "También puedes ser más específico: \"¿Qué propiedades hay en venta en [zona]?\" o \"¿Cuáles son los precios de alquiler en [documento]?\""
+        "También puedes preguntarme de forma más específica:\n"
+        "• \"¿Qué propiedades hay en venta en [zona]?\"\n"
+        "• \"¿Cuáles son los precios de alquiler en [zona]?\"\n"
+        "• \"Busco una casa de [X] dormitorios\""
     )
 
 def get_relevant_chunks(query: str, top_k: int = TOP_K) -> Optional[List[Tuple[str, float, Dict]]]:
@@ -208,53 +190,49 @@ def get_relevant_chunks(query: str, top_k: int = TOP_K) -> Optional[List[Tuple[s
 
 def _build_prompt(query: str, context_chunks: List[Tuple[str, float, Dict]], history: str = "") -> str:
     """
-    Build the final prompt: system instruction + (optional) chat history + RAG context.
+    Construir prompt limpio para el modelo inmobiliario.
     """
-    # Truncate each chunk for safety; keep useful content
-    context_str = "\n\n".join([
-        f"- [{(m or {}).get('pdf','?')} p.{(m or {}).get('page_start','?')}] {c[:1000]}"
-        for c, _, m in context_chunks
-    ])
+    # Preparar contexto de propiedades de manera limpia
+    context_parts = []
+    for chunk_text, similarity, meta in context_chunks:
+        # Limpiar y resumir información relevante
+        clean_text = chunk_text[:800].strip()  # Limitar tamaño
+        if clean_text:
+            context_parts.append(f"• {clean_text}")
+    
+    context_str = "\n".join(context_parts) if context_parts else "No hay información específica disponible."
+    
+    # Construir prompt simple y directo
+    prompt = f"""Instrucciones: {SYSTEM_INSTRUCTION}
 
-    base = f"{SYSTEM_INSTRUCTION}\n\n"
-    if history.strip():
-        base += (
-            "Historial (para tono/continuidad, NO como fuente autoritativa):\n"
-            f"{history.strip()}\n\n"
-        )
+Información disponible sobre propiedades:
+{context_str}
 
-    base += f"Contexto (fragmentos relevantes):\n{context_str}\n\n"
+Consulta del cliente: {query}
 
-    # 🔒 Anti‑alucinación extra: reglas explícitas antes de la pregunta
-    base += (
-        "Reglas finales:\n"
-        "- Si no estás 100% seguro por el contexto, dilo claramente.\n"
-        "- No inventes páginas ni citas si no aparecen en el contexto.\n"
-        "- Si el contexto es ambiguo o insuficiente, pide una reformulación enfocada en secciones/títulos del PDF.\n\n"
-    )
+Responde como Remaxi (asistente de Remax Express) usando la información disponible:"""
 
-    base += f"Pregunta: {query}\nRespuesta:"
-    return base
+    return prompt
 
 def _generate_friendly_response(query: str) -> str:
     """
-    Generar respuesta amigable para consultas sin contexto RAG específico.
-    Útil para saludos y consultas generales.
+    Generar respuesta profesional con emojis de Remaxi para consultas sin contexto RAG específico.
+    Siempre pide más detalles cuando no tiene información suficiente.
     """
     query_lower = query.lower().strip()
     
     # Detectar saludos
     greetings = ['hola', 'buenos dias', 'buenas tardes', 'buenas noches', 'saludos', 'hi', 'hello']
     if any(greeting in query_lower for greeting in greetings):
-        return "¡Hola! 👋 Soy tu asistente inmobiliario de REMAXI. Estoy aquí para ayudarte con información sobre propiedades, precios, ubicaciones y todo lo relacionado con bienes raíces. ¿En qué puedo asistirte hoy?"
+        return "¡Hola! Soy Remaxi, tu asistente de Remax Express especializado en venta y alquiler de propiedades. ¿Qué tipo de propiedad estás buscando? ¿Para compra o alquiler?"
     
     # Detectar agradecimientos
     thanks = ['gracias', 'thank you', 'thanks']
     if any(thank in query_lower for thank in thanks):
-        return "¡De nada! 😊 Estoy aquí para ayudarte con cualquier consulta inmobiliaria que tengas. No dudes en preguntarme sobre propiedades, precios o ubicaciones."
+        return "¡De nada! Estoy aquí para ayudarte a encontrar la propiedad perfecta. ¿Hay alguna zona específica o características que te interesen?"
     
-    # Respuesta general para otras consultas sin contexto
-    return "Soy tu asistente inmobiliario de REMAXI. Aunque no tengo información específica sobre tu consulta en mi base de datos actual, estaré encantado de conectarte con uno de nuestros agentes especializados que podrá brindarte información detallada. ¿Te gustaría que coordine una llamada?"
+    # Respuesta pidiendo más detalles (NO ofrecer conectar con agente inmediatamente)
+    return "Para ayudarte mejor con esa consulta, necesito algunos detalles adicionales. ¿Podrías contarme qué tipo de propiedad buscas, en qué zona, y si es para compra o alquiler? ¡Así podré darte información más específica!"
 
 def _get_query_hash(query: str, history: str = "") -> str:
     """Generate hash for caching based on query and history - SOLO para consultas similares"""
@@ -313,24 +291,25 @@ def ask_mistral_with_context(query: str, history: str = "") -> dict:
     - If no relevant context above threshold, generate friendly greeting response.
     - Else, send prompt with system instruction + context to Ollama.
     """
-    print(f"🔍 IA Query: '{query[:60]}...'")
+    print(f"IA Query: '{query[:60]}...'")
     
     # 1. Check cache first
     query_hash = _get_query_hash(query, history)
     cached = _get_cached_response(query_hash)
     if cached:
-        print(f"⚡ Respuesta IA desde CACHE para: {query[:50]}...")
+        print(f"Respuesta IA desde CACHE para: {query[:50]}...")
         return {**cached, "from_cache": True}
     # 2. Process query normally
     chunks = get_relevant_chunks(query)
-    print(f"🔍 Chunks encontrados: {len(chunks) if chunks else 0}")
+    print(f"Chunks encontrados: {len(chunks) if chunks else 0}")
     
     if not chunks:
-        # Sin contexto RAG relevante - usar respuesta estricta
-        print("⚠️ Sin contexto relevante encontrado")
+        # Sin contexto RAG relevante - usar respuesta profesional
+        print("Sin contexto relevante encontrado")
+        friendly_response = _generate_friendly_response(query)
         response = {
             "question": query, 
-            "answer": "No tengo información específica sobre propiedades en esa zona. Te conectaré con un agente especializado que puede ayudarte mejor.", 
+            "answer": friendly_response, 
             "used_context": False
         }
         # Cache simple responses too
@@ -340,24 +319,24 @@ def ask_mistral_with_context(query: str, history: str = "") -> dict:
     # Log de chunks encontrados
     for i, (text, sim, meta) in enumerate(chunks[:2]):
         source = meta.get('source_type', meta.get('pdf', 'unknown'))
-        print(f"📄 Chunk {i+1}: {source} (sim: {sim:.3f}) - {text[:80]}...")
+        print(f"Chunk {i+1}: {source} (sim: {sim:.3f}) - {text[:80]}...")
 
     prompt = _build_prompt(query, chunks, history)
 
     try:
-        # Configuración optimizada para WhatsApp: Respuestas RÁPIDAS
+        # Configuración optimizada para Mistral - respuestas rápidas y coherentes
         payload = {
             "model": OLLAMA_MODEL_NAME, 
             "prompt": prompt, 
             "stream": False,
             "options": {
-                "temperature": 0.2,     # Más determinista = más rápido
-                "top_k": 10,           # Menos opciones = más rápido
-                "top_p": 0.7,          # Enfoque en opciones más probables
-                "repeat_penalty": 1.1,
-                "num_predict": 200,    # Limitar tokens de respuesta
-                "num_ctx": 1024,       # Contexto reducido para acelerar
-                "stop": ["\n\n\n"]     # Parar en párrafos largos
+                "temperature": 0.2,     # Balanceado para naturalidad sin incoherencias
+                "top_k": 20,           # Suficientes opciones para variedad
+                "top_p": 0.8,          # Mejor para respuestas naturales
+                "repeat_penalty": 1.2,  
+                "num_predict": 200,    # Respuestas más cortas = más rápidas
+                "num_ctx": 512,       # Contexto reducido para velocidad
+                "stop": ["\n\nPregunta:", "Usuario:", "Instrucciones:", "Consulta del cliente:"]
             }
         }
         
@@ -373,17 +352,103 @@ def ask_mistral_with_context(query: str, history: str = "") -> dict:
                 "used_context": False,
             }
         data = resp.json()
-        answer = data.get("response", "").strip()
+        raw_answer = data.get("response", "").strip()
+        
+        # Limpiar y validar la respuesta antes de procesarla
+        clean_answer = _clean_and_validate_response(raw_answer, query)
+        
+        # Mejorar respuesta agregando frase clave si cliente muestra interés en agendar
+        enhanced_answer = _enhance_response_with_appointment_key(query, clean_answer)
         
         # Cache successful response
-        response = {"question": query, "answer": answer, "used_context": True}
+        response = {"question": query, "answer": enhanced_answer, "used_context": True}
         _cache_response(query_hash, response)
         
-    except requests.RequestException:
-        # Don't cache error responses
-        return {"question": query, "answer": "Error de conexión con el modelo de IA.", "used_context": False}
+    except requests.RequestException as e:
+        print(f"Error de conexión con Ollama: {e}")
+        # Generar respuesta alternativa profesional en lugar de mostrar error técnico
+        fallback_answer = _generate_friendly_response(query)
+        return {"question": query, "answer": fallback_answer, "used_context": False}
 
     return response
+
+def _clean_and_validate_response(raw_answer: str, original_query: str) -> str:
+    """
+    Limpiar y validar respuesta del modelo para evitar incoherencias.
+    """
+    if not raw_answer or len(raw_answer.strip()) == 0:
+        return _generate_friendly_response(original_query)
+    
+    answer = raw_answer.strip()
+    
+    # Detectar si la respuesta contiene partes del prompt del sistema
+    problematic_phrases = [
+        "Eres Remaxi", "OBJETIVO:", "REGLAS FUNDAMENTALES:", 
+        "Instrucciones:", "Consulta del cliente:",
+        "[PDF:", "User:", "A:", "Contexto (fragmentos relevantes):"
+    ]
+    
+    # Si contiene frases problemáticas, generar respuesta alternativa
+    if any(phrase in answer for phrase in problematic_phrases):
+        print(f"Respuesta problemática detectada, generando alternativa")
+        return _generate_friendly_response(original_query)
+    
+    # Detectar respuestas sin sentido o muy cortas
+    if len(answer) < 10 or answer.count(" ") < 3:
+        print(f"Respuesta demasiado corta, generando alternativa")
+        return _generate_friendly_response(original_query)
+    
+    # Limpiar caracteres extraños y líneas múltiples
+    answer = answer.replace("\\n", " ").replace("\n\n\n", "\n\n")
+    
+    # Si la respuesta es demasiado larga, truncar pero mantener coherencia
+    if len(answer) > 500:
+        # Buscar un punto natural para cortar (final de oración)
+        truncate_at = 400
+        if "." in answer[truncate_at:]:
+            truncate_at = answer.find(".", truncate_at) + 1
+        answer = answer[:truncate_at]
+    
+    return answer.strip()
+
+def _enhance_response_with_appointment_key(query: str, answer: str) -> str:
+    """
+    Agregar frase clave COORDINAR_CITA_INMOBILIARIA cuando el cliente CONFIRMA querer agendar una cita/visita
+    """
+    query_lower = query.lower()
+    answer_lower = answer.lower()
+    
+    # Detectar frases de CONFIRMACIÓN/ACEPTACIÓN para agendar cita
+    confirmation_phrases = [
+        'si', 'sí', 'claro', 'perfecto', 'ok', 'está bien', 'acepto', 'confirmo',
+        'me gustaría', 'quiero agendar', 'quiero visitar', 'quiero ver',
+        'sí quiero', 'si quiero', 'me interesa la visita', 'coordinar visita',
+        'agendar cita', 'cuando puedo', 'cuándo puedo', 'disponible'
+    ]
+    
+    # Detectar si Remaxi ofrece coordinar visita en la respuesta
+    remaxi_offers_visit = any(phrase in answer_lower for phrase in [
+        'coordinar', 'visita', 'agendar', 'cita', 'ver la propiedad', 
+        '¿te gustaría que coordinemos', '¿quieres que coordinemos'
+    ])
+    
+    # Detectar si cliente CONFIRMA/ACEPTA agendar
+    client_confirms = any(phrase in query_lower for phrase in confirmation_phrases)
+    
+    # Solo agregar frase clave si:
+    # 1. El cliente confirma/acepta algo relacionado con agendar, O
+    # 2. El cliente directamente pide agendar una cita/visita, Y
+    # 3. Remaxi menciona coordinar visita en su respuesta
+    wants_to_schedule = any(phrase in query_lower for phrase in [
+        'quiero agendar', 'quiero visitar', 'agendar cita', 'coordinar visita'
+    ])
+    
+    should_add_key = (client_confirms or wants_to_schedule) and remaxi_offers_visit
+    
+    if should_add_key and "COORDINAR_CITA_INMOBILIARIA" not in answer:
+        return f"{answer} COORDINAR_CITA_INMOBILIARIA"
+    
+    return answer
 
 def summarize_corpus(max_items: int = 8) -> dict:
     """
